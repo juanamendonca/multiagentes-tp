@@ -37,3 +37,21 @@ Registro append-only. Formato: Context / Decision / Rejected / Consequences.
 **Decision**: en spec, plan y artefactos el comando se escribe `git grep -nE "(sk-[A-Za-z0-9]{16,}|pcsk[_]|lsv2[_])"`: `[_]` coincide con el mismo carácter, pero el texto del comando ya no coincide consigo mismo. Con este cambio, tanto la forma original como la nueva dan vacío sobre el repo.
 **Rejected**: excluir `specs/` del grep (dejaría sin revisar los artefactos); aceptar el chequeo como FAIL permanente.
 **Consequences**: en archivos versionados no escribir los prefijos de claves de Pinecone/LangSmith en forma literal (usar la forma con `[_]` o describirlos). Cambio editorial en el plan (3 líneas) y en NFR-003 de la spec (changelog 0.4).
+
+## D-007: Alcance del forward-fill en encabezados de varias filas  (Iteration 2)
+**Context**: BR-002 pide propagar hacia la derecha las celdas combinadas antes de unir niveles, sin decir en qué filas ni hasta dónde. Propagar en la fila hoja convierte columnas con encabezado realmente vacío en duplicados (`X`, `X_2`), y propagar sin límites mezcla grupos (`2022` invadiendo columnas de `2023`).
+**Decision**: `flatten_header` propaga solo en las filas que no son la última (niveles superiores), y una celda vacía no recibe el valor de su izquierda si en alguna fila superior empieza un grupo nuevo en esa columna. Las celdas se normalizan con `clean_text` (espacios y saltos de línea colapsados). Luego: unión con `" - "`, `col_<i>` para vacíos, deduplicación con `_2`, `_3`… (si el sufijo ya existe, se sigue incrementando).
+**Rejected**: forward-fill en todas las filas (incluida la hoja); forward-fill sin respetar grupos superiores.
+**Consequences**: con una sola fila de encabezado nunca se propaga (los vacíos son `col_<i>`). VC-012 pasa tal como está escrito. Si un PDF real tiene una celda combinada en la fila hoja, sale como `col_<i>`; Iteración 3 lo ve con `scripts/inspect_pdf.py`.
+
+## D-008: Inferencia del separador decimal y `default_decimal`  (Iteration 2)
+**Context**: BR-003 infiere el decimal por columna con dos señales es-AR (`\d{1,3}(\.\d{3})+,\d+`, `\d+,\d{1,2}` sin otro separador); si no, `.`. Un `"1.234"` aislado es ambiguo (plan, Iteración 2).
+**Decision**: `infer_decimal_separator(cells, default=".")` mira el núcleo numérico (sin signo, unidades, paréntesis ni espacios). (1) `,` si hay señal es-AR: las dos de la spec + `\d+,\d{4,}` + `\d{1,3}(\.\d{3}){2,}`; (2) si no, `.` si hay señal en-US simétrica (`1,234.5`, `12.5`, `0.1234`, `1,234,567`); (3) si no, `default`. `normalize_table(..., default_decimal=".")` lo pasa a cada columna. El parseo exige grupos de miles de 3 dígitos (`"12.34.5"` → no es número).
+**Rejected**: estado global/documental dentro de `table_parsing` (rompe la pureza); tratar `"1.234"` siempre como miles.
+**Consequences**: con el default `.` el comportamiento es exactamente el de la spec. Iteración 3 puede calcular la señal del documento con `infer_decimal_separator(<todas las celdas de todas las tablas>)` y pasarla como `default_decimal` (recomendado para PDFs de INDEC, que son es-AR). La señal de la columna siempre gana sobre el default.
+
+## D-009: Dtypes resultantes de `normalize_table`  (Iteration 2)
+**Context**: el plan exige columnas numéricas (`float64`/`Int64`) o texto (`str`), nunca `object`, para Parquet; la spec no fija cuándo usar enteros ni qué hacer con columnas vacías.
+**Decision**: años (todas las celdas no vacías `\d{4}` en 1900–2100) → `Int64` (nulos `<NA>`); demás numéricas (≥ 80 %) → `float64`, y las celdas no vacías que no parsean quedan `NaN`; resto → `str`. Columna toda vacía → `str` (todo `NaN`). `NormalizedTable.dtypes` = `str(df[c].dtype)` (`"float64"`, `"Int64"`, `"str"`), que es el "dtype real" de BR-007. Marcadores de BR-004 se comparan sin mayúsculas (`S/D`, `X`) y se acepta `…` (U+2026) como `...`; aplican también en columnas de texto.
+**Rejected**: inferir `Int64` para cualquier columna entera (cambia dtypes entre tablas parecidas sin beneficio); `object` para columnas vacías.
+**Consequences**: una columna de importes entre 1900 y 2100 se tipará como `Int64` (los valores no cambian). En columnas numéricas se pierde el texto de las celdas no numéricas (p. ej. notas); el 80 % lo acota.

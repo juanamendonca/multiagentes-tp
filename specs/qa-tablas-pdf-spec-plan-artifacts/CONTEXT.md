@@ -1,14 +1,15 @@
 # CONTEXT — estado actual del código
 
-Última actualización: Iteración 1 (bootstrap). Rama de trabajo: `feat/qa-tablas`.
+Última actualización: Iteración 2 (normalización de tablas). Rama de trabajo: `feat/qa-tablas`.
 
 ## Current state
 
-- El proyecto se instala con `requirements.txt` en el venv `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (23 tests, sin red, ~3 s).
+- El proyecto se instala con `requirements.txt` en el venv `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (74 tests, sin red, ~3 s).
 - `services/config.py` carga y valida la configuración de spec §7.1 (`load_settings`), con `ConfigError` que lista todas las variables faltantes/inválidas (FR-002, lado lógico).
 - `services/llm.py` construye el chat model y los embeddings contra el proxy LiteLLM (FR-001) y ofrece caché SQLite opcional `.langchain.db` (FR-005).
 - Modelos elegidos (D-001): `LLM_MODEL=gpt-5.4-mini` (`temperature=0`), `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIM=1536`.
-- Todavía no hay PDFs, Pinecone, agentes, sandbox ni UI.
+- `services/table_parsing.py` normaliza tablas crudas (filas de celdas `str | None`) a un `DataFrame` listo para Parquet: aplanado de encabezados (BR-002), números es-AR/en-US con unidades (BR-003), faltantes → `NaN` (BR-004) y mínimos de tabla (BR-005). Funciones puras, sin PDFs.
+- Todavía no hay extracción de PDFs, Pinecone, agentes, sandbox ni UI.
 
 ## File map
 
@@ -24,15 +25,18 @@ specs/                    spec, plan y este directorio de artefactos
 services/__init__.py
 services/config.py        Settings, load_settings, ConfigError, REQUIRED_VARS
 services/llm.py           get_chat_model, get_embeddings, SQLiteCache, enable_cache_if_configured
+services/table_parsing.py flatten_header, parse_number, infer_decimal_separator, is_missing_marker,
+                          clean_text, normalize_table, NormalizedTable, check_minimums (BR-002..BR-005)
 tests/__init__.py
 tests/fakes.py            ScriptedChatModel (LLM fake guionado con contador de llamadas)
 tests/unit/__init__.py
 tests/unit/test_config.py            VC-002
 tests/unit/test_llm.py               FR-001 (construcción) + VC-005 (caché)
 tests/unit/test_single_llm_client.py VC-001 (único lugar que construye clientes LLM)
+tests/unit/test_table_parsing.py     VC-012, VC-013, VC-014, VC-019 (mínimos) + casos borde; tests test_vcNNN_*
 ```
 
-Layout futuro fijado por el plan: `app.py`, `agents/{ingestion,analyst}/`, `services/{table_parsing,pdf_extract,pdf_context,table_store,vectorstore,sandbox,tracing}.py`, `ui/`, `eval/`, `scripts/`, `tests/{unit,integration,fixtures}/`, `data/{sample_pdfs,tables}/`.
+Layout futuro fijado por el plan: `app.py`, `agents/{ingestion,analyst}/`, `services/{pdf_extract,pdf_context,table_store,vectorstore,sandbox,tracing}.py`, `ui/`, `eval/`, `scripts/`, `tests/{unit,integration,fixtures}/`, `data/{sample_pdfs,tables}/`.
 
 ## Public interfaces
 
@@ -66,6 +70,31 @@ def enable_cache_if_configured(settings: Settings, database_path: str | Path = P
     # LLM_CACHE=true -> set_llm_cache(SQLiteCache(...)) y lo devuelve; false -> None, no toca la caché global
 ```
 
+```python
+# services/table_parsing.py  (funciones puras; Decimal = Literal[",", "."]; Cell = str | None)
+@dataclass
+class NormalizedTable:
+    df: pd.DataFrame                 # columnas str únicas no vacías; cada una float64 | Int64 | str; índice RangeIndex
+    dtypes: dict[str, str]           # col -> str(df[col].dtype): "float64" | "Int64" (años) | "str"
+    unit_hints: dict[str, str | None]  # col -> "%" | "$" | "US$" | "€" | None (unidad removida al parsear)
+def normalize_table(raw_rows: Sequence[Sequence[Cell]], header_rows: int,
+                    default_decimal: Decimal = ".") -> NormalizedTable
+    # raw_rows = encabezado + datos (como find_tables().extract()); las primeras header_rows filas son
+    # el encabezado (0 -> col_<i>); filas cortas se completan con vacíos; ValueError si header_rows fuera de rango.
+    # Por columna: marcadores/vacíos -> NaN; años 1900-2100 -> Int64; >= 80 % parsean -> float64 (+unit_hint,
+    # las no numéricas -> NaN); si no -> str. default_decimal solo aplica a columnas sin señal (D-008).
+def flatten_header(rows: Sequence[Sequence[Cell]], n_cols: int | None = None) -> list[str]   # BR-002, D-007
+def parse_number(cell: str | None, decimal: Decimal) -> float | None    # None si no es número o es faltante
+def infer_decimal_separator(cells: Sequence[Cell], default: Decimal = ".") -> Decimal     # D-008
+def is_missing_marker(cell: object) -> bool      # "", None, -, –, —, s/d, n/d, ..., …, ///, x (sin mayúsculas)
+def clean_text(cell: object) -> str              # colapsa espacios/saltos de línea; None -> ""
+def check_minimums(df: pd.DataFrame) -> str | None
+    # BR-005 sobre el df ya normalizado: motivo en español ("tabla descartada: ...") si < 2 filas de datos,
+    # < 2 columnas o > 60 % de celdas NaN (60 % exacto se conserva); None si cumple.
+# Constantes: NUMERIC_THRESHOLD=0.8, YEAR_MIN/YEAR_MAX=1900/2100, MIN_DATA_ROWS=2, MIN_COLS=2,
+#             MAX_EMPTY_FRACTION=0.6, MISSING_MARKERS, HEADER_JOINER=" - "
+```
+
 Variables de entorno: spec §7.1 (todas en `.env.example`). Semántica (D-005): vacío = no definida; opcionales y obligatorias con default concreto toman el default; `LANGSMITH_PROJECT` es obligatoria.
 
 ### Fakes de test (`tests/fakes.py`)
@@ -85,7 +114,11 @@ Variables de entorno: spec §7.1 (todas en `.env.example`). Semántica (D-005): 
 - Tests `[U]` sin red ni claves: usan `load_settings(dict)` con valores de prueba (`tests/unit/test_config.py::FULL_ENV`) y fakes de `tests/fakes.py`. Tests con servicios reales llevan `@pytest.mark.integration` (`--strict-markers` está activo).
 - Imports absolutos desde la raíz (`from services.config import ...`, `from tests.fakes import ...`); `pytest.ini` agrega `.` al path.
 - Idioma: mensajes/prompts/docs en español; identificadores en inglés.
-- pandas 3 (copy-on-write, dtype `str` por defecto para texto).
+- pandas 3 (copy-on-write, dtype `str` por defecto para texto). Las columnas de texto se crean con `dtype="str"` (None → `NaN`).
+- Los DataFrames normalizados nunca tienen 0 donde había una celda vacía o un marcador de faltante (BR-004): quedan `NaN`/`<NA>`. Nunca hay columnas `object`: cada una es `float64`, `Int64` o `str`, así que se escriben en Parquet tal cual (test de round-trip en `test_table_parsing.py`).
+- Nombres de columna de tablas: únicos, no vacíos, `str`, según BR-002/D-007; los años del encabezado quedan como texto (`"2023"`).
+- Separador decimal: se infiere por columna; `default_decimal` (por defecto `.`) solo decide columnas sin señal (D-008). Iteración 3 debería calcular la señal del documento y pasarla.
+- Motivos de descarte/avisos en español; los genera `check_minimums` y la Iteración 3 los envuelve en `IngestionWarning`.
 - El notebook se versiona **sin outputs**.
 
 ## Commands
@@ -96,10 +129,12 @@ Variables de entorno: spec §7.1 (todas en `.env.example`). Semántica (D-005): 
 # tests unitarios (sin red) y lint
 .venv\Scripts\python -m pytest -m "not integration"
 .venv\Scripts\ruff check .
-# tests de esta iteración
+# tests por módulo
 .venv\Scripts\python -m pytest tests/unit/test_single_llm_client.py tests/unit/test_config.py tests/unit/test_llm.py -v
-# chequeo de secretos (debe dar vacío) y que .env no esté trackeado
+.venv\Scripts\python -m pytest tests/unit/test_table_parsing.py -v
+# chequeo de secretos (debe dar vacío; repetir con --cached tras el stage) y que .env no esté trackeado
 git grep -nE "(sk-[A-Za-z0-9]{16,}|pcsk[_]|lsv2[_])"
+git grep --cached -nE "(sk-[A-Za-z0-9]{16,}|pcsk[_]|lsv2[_])"
 git ls-files .env
 # re-ejecutar la exploración de modelos (llamadas reales al proxy; outputs fuera del repo)
 .venv\Scripts\jupyter nbconvert --to notebook --execute --output-dir $env:TEMP\nbrun notebooks/00_litellm_exploracion.ipynb
@@ -107,8 +142,10 @@ git ls-files .env
 
 ## Known gaps
 
-- 🧑 **`.env` incompleto** (Human gate): hoy solo tiene `LITELLM_BASE_URL` y `LITELLM_API_KEY`. Faltan `LLM_MODEL`, `EMBEDDING_MODEL`, `EMBEDDING_DIM` (valores en D-001 / `.env.example`), `PINECONE_API_KEY`, `PINECONE_INDEX_NAME` (opcional, default), `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`. `load_settings()` sobre el `.env` real hoy lanza `ConfigError`. Bloquea la Iteración 4 (Pinecone) y la 5 (LangSmith); no bloquea las 2 y 3.
+- `.env` completo: el usuario confirmó (antes de la Iteración 2) que tiene todas las variables obligatorias. Pinecone/LangSmith se usan recién desde la Iteración 4/5; no se verificó todavía contra los servicios.
 - La parte de UI de FR-002 (mostrar el error y deshabilitar pestañas) → Iteración 9.
 - NFR-001: solo probado en Python 3.13 (no hay 3.11/3.12 en la máquina).
 - `FakeVectorStore` / `FakeEmbeddings` todavía no existen → Iteración 4 (en `tests/fakes.py`).
-- Hay un PDF sin trackear en la raíz (`mercado_trabajo_eph_2trim26433FCBC5A8.pdf`) que apareció durante la Iteración 1; no se commiteó. Candidato para OQ-2 (Iteración 3), que debe moverlo a `data/sample_pdfs/` con permiso del usuario.
+- PDF de muestra provisto por el usuario, todavía sin trackear en la raíz: `mercado_trabajo_eph_2trim26433FCBC5A8.pdf` (INDEC, EPH "Mercado de trabajo", 2.4 MB). El usuario confirmó que es uno de los PDFs de muestra que quiere usar. → Iteración 3: moverlo a `data/sample_pdfs/` (lo aportó el usuario: no hace falta pedir aprobación de descarga para él), citar su URL en `SOURCES.md` y proponer el/los otros PDFs (OQ-2).
+- `table_parsing` no conoce PDFs: la detección de cuántas filas son encabezado (`header_rows`), la señal decimal del documento (`default_decimal`), los avisos `IngestionWarning` y la unión multipágina (BR-001) son de la Iteración 3.
+- `U$S` (variante argentina de `US$`) no está en la lista de símbolos de BR-003: una celda `U$S 100` no parsea como número. Revisar con los PDFs reales en la Iteración 3.
