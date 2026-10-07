@@ -55,3 +55,45 @@ Registro append-only. Formato: Context / Decision / Rejected / Consequences.
 **Decision**: años (todas las celdas no vacías `\d{4}` en 1900–2100) → `Int64` (nulos `<NA>`); demás numéricas (≥ 80 %) → `float64`, y las celdas no vacías que no parsean quedan `NaN`; resto → `str`. Columna toda vacía → `str` (todo `NaN`). `NormalizedTable.dtypes` = `str(df[c].dtype)` (`"float64"`, `"Int64"`, `"str"`), que es el "dtype real" de BR-007. Marcadores de BR-004 se comparan sin mayúsculas (`S/D`, `X`) y se acepta `…` (U+2026) como `...`; aplican también en columnas de texto.
 **Rejected**: inferir `Int64` para cualquier columna entera (cambia dtypes entre tablas parecidas sin beneficio); `object` para columnas vacías.
 **Consequences**: una columna de importes entre 1900 y 2100 se tipará como `Int64` (los valores no cambian). En columnas numéricas se pierde el texto de las celdas no numéricas (p. ej. notas); el 80 % lo acota.
+
+## D-010: PDFs de muestra (OQ-2) y recorte del Anuario de CEPAL  (Iteration 3)
+**Context**: OQ-2. El usuario proveyó 3 PDFs públicos con sus URLs (no se descargó nada): EPH "Mercado de trabajo" de INDEC 2T2026 (26 págs.) y 2T2025 (23 págs.), y el Anuario Estadístico de América Latina y el Caribe 2025 de CEPAL (175 págs.). Inspeccionados con `scripts/inspect_pdf.py`: los tres tienen capa de texto y tablas que `find_tables` detecta; los de INDEC no tienen tablas que crucen página (cada cuadro ocupa una); CEPAL sí (p. ej. cuadros 1.1.1, 1.4.1, 3.2.2).
+**Decision**: se usan los tres. INDEC completos (≤ 30 págs.). CEPAL recortado a las págs. 15–24 (capítulo 1: 1.1 Población y 1.2 Trabajo): contiene la tabla multipágina 1.1.1 (págs. 3–4 del extracto) y datos por país de población y trabajo relacionados con la EPH (preguntas multitabla). Nombres: `indec_eph_mercado_trabajo_2t2026.pdf`, `indec_eph_mercado_trabajo_2t2025.pdf`, `cepal_anuario_estadistico_2025_poblacion_trabajo.pdf`. Fuentes, rango y comando de recorte en `data/sample_pdfs/SOURCES.md`; spec v0.5 (FR-070, §9, A-4).
+**Rejected**: otros capítulos de CEPAL (cuentas nacionales, ambiente: menos relacionados con la EPH); `pdfplumber` como respaldo (A-4 no lo necesitó).
+**Consequences**: el original de CEPAL (`content.pdf`) se borró de la raíz tras verificar que el texto de cada página del extracto es idéntico; su SHA-256 queda en `SOURCES.md`. Las páginas de CEPAL en `source.pages` son las del extracto (original = extracto + 14).
+
+## D-011: Llamadas a nota al pie pegadas a números  (Iteration 3)
+**Context**: CEPAL marca totales regionales con letras (`667 888.6b`, `-0.6c`) e INDEC con números de nota (`45,4 (1)`, `25,2(2)`); con BR-003 literal esas celdas no parsean (totales perdidos como `NaN`, y columnas enteras del Cuadro 1.1 de INDEC quedaban como texto). No hay `U$S` en los PDFs elegidos.
+**Decision**: `table_parsing._decompose` quita al final de la celda, solo detrás de un dígito o `%`: 1–2 letras minúsculas, `(letras)`, `(1-2 dígitos)` o 1–3 `*`. `"(12)"` solo sigue siendo negativo; `"x"` solo sigue siendo faltante.
+**Rejected**: quitar cualquier sufijo no numérico (convertiría textos en números); dejar los totales como `NaN`.
+**Consequences**: la referencia a la nota se pierde de la celda (la nota queda en el contexto `below`). Una celda tipo `"12a"` pasa a ser 12. Las notas pegadas a texto (`"Argentinab"`) no se tocan.
+
+## D-012: Encabezados reconstruidos desde las palabras de la página  (Iteration 3)
+**Context**: `table.header` y las filas de encabezado de `extract()` vienen rotos en los PDFs reales: INDEC dibuja el encabezado aparte (`find_tables` lo da como una "tabla" 2×2 con textos mezclados, como una sola celda con todo, o no lo detecta y queda como texto suelto); CEPAL tiene 4 filas de encabezado con celdas combinadas.
+**Decision**: filas de encabezado = la primera fila (si no es numérica) + las siguientes con la primera celda vacía y sin números que no sean años. La franja de encabezado (esas filas; más una "tabla" sin datos ≤ 15 pt encima, que se absorbe; o, si la tabla no tiene encabezado propio, texto suelto ≤ 22 pt encima con líneas a ≤ 9 pt, aceptado solo si nombra ≥ 2 columnas) se lee con `get_text("words")`: frases por línea, asignadas a la columna (límites de las celdas del cuerpo) que contiene su centro; una frase centrada sobre una raya horizontal (≤ 9 pt debajo, no de ancho completo, con subencabezados debajo y una sola frase subrayada) abarca las columnas bajo la raya. Por columna, las líneas pegadas (≤ 3 pt) se unen con espacio y los niveles con `" - "`; después `flatten_header`.
+**Rejected**: `table.header.names` (mezcla títulos de cuadro); forward-fill de `flatten_header` sobre `extract()` (no distingue celdas vacías reales de combinadas); `pdfplumber`.
+**Consequences**: nombres exactos como `"Total 31 aglomerados urbanos - Año 2026 - 2° trimestre*"` o `"Tasas generales - Desocupación"`. Heurística con umbrales en puntos (constantes en `pdf_extract.py`); un PDF con otro diseño puede pedir ajustarlos (`inspect_pdf.py` lo muestra).
+
+## D-013: Detalles de BR-001 y BR-005 sobre las tablas detectadas  (Iteration 3)
+**Context**: BR-001 habla de "primera/última tabla de la página" y de "≥ 50 % de celdas numéricas" sin precisar; las celdas vacías y los marcadores (`…`) son frecuentes.
+**Decision**: BR-001 se evalúa sobre las tablas detectadas después de absorber fragmentos de encabezado (D-012) y antes de BR-005; `index_on_page` es la posición en esa lista (orden por y, x). (d) "fila numérica" = ≥ 50 % de las celdas con contenido (no vacías ni marcadores) parsean como número es-AR o en-US. Encabezados iguales = nombres reconstruidos iguales con `clean_text().casefold()`. Las filas de datos totalmente vacías se descartan; BR-005 se aplica a la tabla lógica unida.
+**Rejected**: contar celdas vacías en el denominador (una fila de CEPAL con `...` dejaría de contar como numérica).
+**Consequences**: una tabla basura al pie de una página impediría unir con la siguiente (no pasa en los PDFs elegidos).
+
+## D-014: Contexto: bloques excluidos y sección  (Iteration 3)
+**Context**: BR-006 literal tomaba como contexto el texto del encabezado de la tabla, celdas de otras tablas y pies de página, y como "sección" epígrafes de cuadros ("Cuadro 1.4 …") o rótulos de gráficos en negrita ("Ocupados no demandantes…", "de empleo").
+**Decision**: `collect_context(loaded, table, tables=())` ignora bloques cuyo centro cae dentro de alguna tabla (bbox con franja de encabezado) y bloques en el 5 % superior o inferior de la página. La sección además debe empezar con mayúscula o dígito, no ser un epígrafe "Cuadro/Gráfico/Tabla/Figura N" y, si califica solo por negrita, tener fuente ≥ la mediana del documento. El truncado a 2 000 caracteres prioriza sección, después arriba[0], abajo[0], arriba[1]…
+**Rejected**: aplicar BR-006 sin filtros (contexto ruidoso para el LLM).
+**Consequences**: en los PDFs elegidos la sección es el título numerado del capítulo ("1. Resultados del total…", "1.2 Trabajo/Labour") y el epígrafe del cuadro queda en `above[0]`.
+
+## D-015: Una tabla con epígrafe propio no es continuación (condición extra a BR-001)  (Iteration 3)
+**Context**: en EPH 2T2026, el Cuadro 2.2 (última tabla de la pág. 15) y el Cuadro 2.3 (primera de la pág. 16) tienen las mismas 6 columnas y el encabezado estándar de INDEC: BR-001 literal los une en una sola tabla, lo que es incorrecto. La pág. 16 abre con su epígrafe "Cuadro 2.3 …".
+**Decision**: si la primera tabla de la página n+1 tiene encima, en esa página (fuera de la franja de encabezado/pie), un bloque que empieza como epígrafe (`Cuadro|Tabla|Table|Gráfico|Figura|Figure|Mapa` + número, o numeración tipo `1.1.4 `), no se une. Las continuaciones reales (CEPAL 1.1.1, fixtures) no tienen epígrafe.
+**Rejected**: BR-001 literal (tabla mezclada en los datos de demo); frenar la iteración (la spec no es ambigua, pero falla con datos reales).
+**Consequences**: desvío de la spec (BR-001 dice "Excepción: ninguna"). **Pendiente de ratificación del usuario**; si se acepta, agregarlo como excepción de BR-001 en la próxima versión de la spec. Tests: `test_table_with_its_own_caption_is_not_a_continuation` y el de integración de las págs. 15/16.
+
+## D-016: Modelos de la extracción y ubicación de `IngestionWarning`  (Iteration 3)
+**Context**: el plan pone `IngestionWarning` en `agents/ingestion/schemas.py` (Iteración 4), pero la extracción ya lo necesita.
+**Decision**: `IngestionWarning` (Pydantic, frozen) vive en `services/pdf_extract.py`; la Iteración 4 lo reexporta. `LoadedPdf`, `PageText`, `TextBlock`, `RawTable` y `TableContext` son dataclasses (llevan `bytes`/`DataFrame`); `RawTable` con `eq=False`. `LoadedPdf` guarda `pdf_bytes` y `extract_tables` reabre el documento. `RawTable.ref` (`p003-t0`) es el id provisorio de los avisos.
+**Rejected**: Pydantic para estructuras con DataFrames; mantener abierto el `Document` de PyMuPDF en el estado del grafo (no serializable).
+**Consequences**: el PDF se abre dos veces (load + extract); `find_tables` cuesta ~0,5 s por página.

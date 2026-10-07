@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Última actualización | 2026-10-07 |
 | Estado | Draft |
 | Owner | jmendoncag |
@@ -115,7 +115,10 @@ Prioridad MoSCoW: **M** = Must, **S** = Should, **C** = Could.
 
 ### 4.6 Evaluación y entregables
 
-- **FR-070 (M)** — *Given* el repo, *when* se inspecciona `data/sample_pdfs/`, *then* hay ≥ 2 PDFs reales y públicos con capa de texto, al menos uno con una tabla que continúa en otra página, y en el README se cita la fuente (URL) de cada uno.
+- **FR-070 (M)** — *Given* el repo, *when* se inspecciona `data/sample_pdfs/`, *then* hay ≥ 2 PDFs reales y públicos con capa de texto, al menos uno con una tabla que continúa en otra página, y en el README se cita la fuente (URL) de cada uno. PDFs elegidos (detalle, rangos de páginas y particularidades en `data/sample_pdfs/SOURCES.md`):
+  - `indec_eph_mercado_trabajo_2t2026.pdf` — INDEC, *Mercado de trabajo. Tasas e indicadores socioeconómicos (EPH). Segundo trimestre de 2026* (26 págs., completo): https://www.indec.gob.ar/uploads/informesdeprensa/mercado_trabajo_eph_2trim26433FCBC5A8.pdf
+  - `indec_eph_mercado_trabajo_2t2025.pdf` — INDEC, ídem, *Segundo trimestre de 2025* (23 págs., completo): https://www.indec.gob.ar/uploads/informesdeprensa/mercado_trabajo_eph_2trim25C42A813B2A.pdf
+  - `cepal_anuario_estadistico_2025_poblacion_trabajo.pdf` — CEPAL, *Anuario Estadístico de América Latina y el Caribe 2025*, extracto de las págs. 15–24 de 175 (1.1 Población y 1.2 Trabajo); contiene la tabla multipágina (cuadro 1.1.1, págs. 3–4 del extracto): https://repositorio.cepal.org/server/api/core/bitstreams/b2476d6d-34cd-4e70-a7b7-d39e244a9070/content
 - **FR-071 (M)** — *Given* el repo, *when* se inspecciona `eval/questions.yaml`, *then* hay ≥ 8 preguntas, cada una con `expected_status`, `expected_answer` (valor y unidad, o `null`), tolerancia, y tablas/páginas esperadas; con al menos 2 multitabla, al menos 1 sin ninguna tabla relacionada (`cannot_answer`) y al menos 1 con tabla relacionada pero dato faltante (`cannot_answer` o `partial`).
 - **FR-072 (S)** — *Given* `eval/questions.yaml` y los PDFs ingeridos, *when* se corre `python -m eval.run_eval`, *then* se ejecuta el Analista sobre cada pregunta y se genera la tabla de resultados de `EVALUATION.md` (estado esperado vs obtenido, valor esperado vs obtenido, correcto/incorrecto, reintentos, link de traza).
 - **FR-073 (M)** — *Given* el repo, *when* se lee `EVALUATION.md`, *then* contiene los resultados de todas las preguntas de prueba, un análisis honesto de errores y limitaciones, y 3 links (o capturas) de trazas representativas de LangSmith: una ingesta, una respuesta `answered` multitabla con ≥ 1 reintento si existe, y una `cannot_answer`/`partial`.
@@ -327,19 +330,20 @@ Etiquetas: **[U]** test unitario sin red; **[I]** test de integración con servi
 
 ## 9. Open Questions
 
-- **OQ-2 — PDFs reales concretos.** Qué 2–3 PDFs públicos usar. Criterios: capa de texto, ≥ 1 tabla multipágina detectable por `find_tables`, temas relacionados entre sí (para preguntas multitabla), ≤ 30 páginas (o recortar a un rango de páginas citado). Candidatos: informes técnicos de INDEC (EPH mercado de trabajo, IPC, cuentas nacionales), estados contables de una empresa que cotiza (CNV), informes del BCRA. Al decidir: se completa FR-070 con los nombres y se escriben las preguntas de FR-071.
+Ninguna.
 
 ## 10. Assumptions
 
 - A-1: La app es local y monousuario; no hay concurrencia sobre `TABLES_DIR` ni sobre el índice.
 - A-2: Los PDFs de muestra están en español o inglés y pesan ≤ 20 MB.
 - A-3: Un único índice Pinecone y namespace por defecto alcanzan (plan Starter).
-- A-4: `find_tables()` de PyMuPDF detecta las tablas de los PDFs elegidos; si no, se evalúa `pdfplumber` como alternativa y se documenta (se valida en OQ-2).
+- A-4: `find_tables()` de PyMuPDF detecta las tablas de los PDFs elegidos; si no, se evalúa `pdfplumber` como alternativa y se documenta. *Validada (v0.5):* `find_tables()` detecta todas las tablas de datos de los tres PDFs de FR-070; los encabezados que los PDFs de INDEC dibujan aparte de la grilla se reconstruyen a partir de las palabras y rayas de la página, sin otra librería.
 - A-5: El modelo elegido soporta salida estructurada vía el proxy (validado con `notebooks/00_litellm_exploracion.ipynb`: `gpt-5.4-mini` pasa `json_schema`, `function_calling`, tool calling y codegen).
 - A-6: El presupuesto de la clave LiteLLM alcanza para desarrollo con caché + 2–3 corridas completas de evaluación.
 
 ## 11. Changelog
 
+- 0.5 (2026-10-07): se resuelve la pregunta abierta de los PDFs de muestra con los PDFs provistos por el usuario: dos informes de la EPH de INDEC (2.º trimestre de 2025 y de 2026, completos) y un extracto de 10 páginas del Anuario Estadístico 2025 de CEPAL (población y trabajo, con la tabla multipágina). Afecta FR-070 (archivos y URLs), §9 (se quita la pregunta) y A-4 (validada).
 - 0.4 (2026-10-07): se resuelve la pregunta abierta de modelos con `notebooks/00_litellm_exploracion.ipynb`: `LLM_MODEL=gpt-5.4-mini` (`temperature=0`), `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIM=1536`. Afecta §7.1, §9 (se quita la pregunta de modelos) y A-5. NFR-003: la regex de secretos se escribe con clases `[_]` (equivalente) para que el propio documento no coincida con ella.
 - 0.3 (2026-10-07): almacén de tablas en Parquet (`pyarrow`) en lugar de CSV, por pedido del usuario: preserva dtypes sin reinferirlos. Afecta FR-023, FR-042, FR-074, BR-012, BR-013, §7.1–7.4, VC-025, VC-056, VC-064.
 - 0.2 (2026-10-07): correcciones de `/review-spec`: FR-027/028/029 (PDF inválido, tope de tablas, falla parcial al indexar), FR-042 (datos locales faltantes), FR-056 (validación de pregunta), precisión de BR-006/BR-007, `static_check` en la interfaz del sandbox, VCs nuevos.

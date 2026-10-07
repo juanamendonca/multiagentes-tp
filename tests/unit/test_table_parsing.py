@@ -377,3 +377,44 @@ def test_columns_are_numeric_or_text_and_roundtrip_parquet(tmp_path: Path) -> No
         path = tmp_path / "t.parquet"
         table.df.to_parquet(path, engine="pyarrow", index=False)
         pd.testing.assert_frame_equal(pd.read_parquet(path), table.df)
+
+
+# --- Llamadas a nota al pie pegadas a números (D-011, Iteración 3) ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("cell", "decimal", "expected"),
+    [
+        ("6.5b", ".", 6.5),
+        ("667 888.6b", ".", 667888.6),
+        ("-0.6c", ".", -0.6),
+        ("12,3(a)", ",", 12.3),
+        ("45,0*", ",", 45.0),
+        ("45,4 (1)", ",", 45.4),
+        ("25,2(2)", ",", 25.2),
+        ("12,5%a", ",", 12.5),
+    ],
+)
+def test_footnote_mark_after_number_is_ignored(cell: str, decimal: str, expected: float) -> None:
+    """Given un número con una llamada a nota al pie al final (como en el Anuario de CEPAL),
+    when se parsea, then se ignora la llamada y se obtiene el número."""
+    assert parse_number(cell, decimal) == pytest.approx(expected)
+
+
+def test_footnote_marks_do_not_turn_text_into_numbers() -> None:
+    """Letras sin un dígito inmediatamente antes siguen siendo texto."""
+    assert parse_number("América Latina d", ".") is None
+    assert parse_number("abc", ".") is None
+    assert parse_number("x", ".") is None  # marcador de faltante (BR-004)
+    assert parse_number("(12)", ",") == -12  # paréntesis sin dígito antes: sigue siendo negativo
+
+
+def test_footnoted_totals_keep_column_numeric() -> None:
+    """Given una columna con totales regionales marcados con notas ("667 888.6b"),
+    when se normaliza, then la columna es numérica y los totales no se pierden."""
+    table = normalize_table(
+        [["País", "Población"], ["Argentina", "45 851.4"], ["Brasil", "212 812.4"], ["Total", "667 888.6b"]],
+        header_rows=1,
+    )
+    assert table.dtypes["Población"] == "float64"
+    assert table.df["Población"].tolist() == [45851.4, 212812.4, 667888.6]

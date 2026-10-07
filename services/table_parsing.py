@@ -43,6 +43,10 @@ _SPACES_RE = re.compile(r"[\s   ]+")
 _UNICODE_MINUS = "−"
 # Orden importante: "US$" antes que "$".
 _UNIT_TOKENS: tuple[str, ...] = ("US$", "$", "€", "%")
+# Llamadas a nota al pie al final de un número (D-011): "667 888.6b", "12,3(a)", "45,4 (1)", "45,0*".
+# Letras minúsculas (1-2), números de nota entre paréntesis (1-2 dígitos) o asteriscos, y solo
+# detrás de un dígito o de "%" (un "(12)" solo sigue siendo un negativo).
+_FOOTNOTE_RE = re.compile(r"(?<=[\d%])\s*(?:\(\s*(?:[a-z]{1,2}|\d{1,2})\s*\)|[a-z]{1,2}|\*{1,3})$")
 
 # Señales para inferir el separador decimal de una columna (sobre el núcleo numérico
 # sin signo, unidades ni espacios). Las dos primeras de cada grupo son las de BR-003.
@@ -131,7 +135,7 @@ def _dedupe(names: list[str]) -> list[str]:
 
 def _decompose(cell: object) -> tuple[str, bool, str | None]:
     """Separa una celda en (núcleo numérico sin espacios externos, negativo, unidad)."""
-    text = clean_text(cell).replace(_UNICODE_MINUS, "-")
+    text = _FOOTNOTE_RE.sub("", clean_text(cell).replace(_UNICODE_MINUS, "-"))
     unit: str | None = None
     for token in _UNIT_TOKENS:
         if token in text:
@@ -179,7 +183,8 @@ def parse_number(cell: str | None, decimal: Decimal) -> float | None:
 
     Admite separadores de miles (el que no es ``decimal``, o espacio / espacio fino,
     con grupos de 3 dígitos), ``$``, ``US$``, ``€``, ``%``, paréntesis como negativo
-    y el signo menos unicode. Los marcadores de BR-004 devuelven ``None``.
+    y el signo menos unicode. Ignora una llamada a nota al pie al final (``"6.5b"``,
+    ``"12,3(a)"``, ``"45,4 (1)"``, ``"45,0*"``; D-011). Los marcadores de BR-004 devuelven ``None``.
     """
     parsed = _parse_with_unit(cell, decimal)
     return None if parsed is None else parsed[0]
