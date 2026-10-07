@@ -1,0 +1,25 @@
+# Dependencias directas, fijadas con == (D-002). Python 3.11-3.13.
+# Instalación: python -m pip install -r requirements.txt
+
+# LLM / agentes / observabilidad
+langchain-core==1.6.7
+langchain-openai==1.6.7
+langgraph==1.2.14
+langsmith==0.14.4
+
+# Servicios y datos
+pinecone==10.0.0
+pymupdf==1.28.2
+pandas==3.0.6
+numpy==2.5.3
+pyarrow==25.0.1
+pydantic==2.13.5
+python-dotenv==1.2.4
+pyyaml==6.0.3
+
+# UI
+streamlit==1.65.0
+
+# Desarrollo: tests y lint
+pytest==9.1.1
+ruff==0.16.10

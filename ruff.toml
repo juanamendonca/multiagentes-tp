@@ -1,0 +1,11 @@
+# Configuración de ruff (D-002). Se corre con: .venv\Scripts\ruff check .
+target-version = "py311"
+line-length = 110
+# El notebook de exploración no es código del proyecto (celdas con imports intermedios).
+extend-exclude = ["notebooks"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[lint.isort]
+known-first-party = ["agents", "services", "ui", "eval", "scripts", "tests"]
