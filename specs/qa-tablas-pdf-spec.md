@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.5 |
+| Versión | 0.6 |
 | Última actualización | 2026-10-07 |
 | Estado | Draft |
 | Owner | jmendoncag |
@@ -126,7 +126,7 @@ Prioridad MoSCoW: **M** = Must, **S** = Should, **C** = Could.
 
 ## 5. Business Rules
 
-- **BR-001 — Continuación de tablas.** Una tabla T₂ en la página *n+1* es continuación de la tabla lógica T₁ cuyo último fragmento está en la página *n* si se cumplen **todas**: (a) T₂ es la primera tabla de la página *n+1*; (b) el último fragmento de T₁ es la última tabla de la página *n*; (c) misma cantidad de columnas; (d) la fila de encabezado de T₂ es igual a la de T₁ tras normalizar (minúsculas, espacios colapsados) **o** T₂ no tiene fila de encabezado (su primera fila tiene ≥ 50 % de celdas numéricas). Si T₂ repite el encabezado, esa fila se descarta. La regla se aplica en cadena (una tabla puede abarcar ≥ 3 páginas). *Razón:* es la definición del enunciado (§5.1). *Excepción:* ninguna; tablas que no cumplen las cuatro condiciones quedan separadas.
+- **BR-001 — Continuación de tablas.** Una tabla T₂ en la página *n+1* es continuación de la tabla lógica T₁ cuyo último fragmento está en la página *n* si se cumplen **todas**: (a) T₂ es la primera tabla de la página *n+1*; (b) el último fragmento de T₁ es la última tabla de la página *n*; (c) misma cantidad de columnas; (d) la fila de encabezado de T₂ es igual a la de T₁ tras normalizar (minúsculas, espacios colapsados) **o** T₂ no tiene fila de encabezado (su primera fila tiene ≥ 50 % de celdas numéricas). Si T₂ repite el encabezado, esa fila se descarta. La regla se aplica en cadena (una tabla puede abarcar ≥ 3 páginas). *Razón:* es la definición del enunciado (§5.1). *Excepción:* si T₂ tiene encima, en la página *n+1* (fuera de la franja de encabezado/pie de página), su propio epígrafe —un bloque que empieza con `Cuadro|Tabla|Table|Gráfico|Figura|Figure|Mapa` + número, o con una numeración tipo `1.1.4 `— no es continuación aunque cumpla las cuatro condiciones (en los informes de INDEC todas las tablas comparten encabezado, y sin esta excepción se unen cuadros distintos). Tablas que no cumplen las cuatro condiciones quedan separadas.
 - **BR-002 — Aplanado de encabezados.** Encabezados de varias filas se combinan por columna uniendo los niveles no vacíos con `" - "` (p. ej. `"2023 - Ene"`); las celdas combinadas horizontalmente se propagan hacia la derecha (forward-fill) antes de unir. Nombres vacíos se reemplazan por `col_<i>`; duplicados reciben sufijo `_2`, `_3`. *Razón:* el código generado necesita nombres únicos y estables. *Excepción:* ninguna.
 - **BR-003 — Normalización numérica.** Una columna se convierte a numérica si ≥ 80 % de sus celdas no vacías parsean como número. El parseo admite: separadores de miles `.`, `,`, espacio o espacio fino; decimal `,` o `.` (se infiere por columna: si algún valor tiene el patrón `\d{1,3}(\.\d{3})+,\d+` o `\d+,\d{1,2}$` sin otro separador, el decimal es `,`); símbolos `$`, `US$`, `€`, `%`; paréntesis como negativo `(1.234)` → `-1234`; signo `−` unicode. Las unidades removidas (`%`, moneda) se registran en el JSON de la tabla como `unit_hint` de la columna. *Razón:* los PDFs reales argentinos usan formato es-AR; los en inglés, en-US. *Excepción:* columnas de años (enteros 1900–2100 en el encabezado o en todas las celdas) se mantienen como enteros sin separadores.
 - **BR-004 — Celdas vacías.** Celdas vacías y los marcadores `-`, `–`, `—`, `s/d`, `n/d`, `...`, `///`, `x` (solo) se convierten a `NaN`. *Razón:* son convenciones habituales de "sin dato" en publicaciones estadísticas; nunca se interpretan como 0. *Excepción:* ninguna.
@@ -260,7 +260,7 @@ Etiquetas: **[U]** test unitario sin red; **[I]** test de integración con servi
 - VC-013 [U] (FR-013, BR-003): `"1.234,5"`→1234.5; `"1,234.5"`→1234.5; `"(1.234)"`→-1234; `"12,5%"`→12.5 con `unit_hint="%"`; `"US$ 3.000"`→3000; `"−7"`→-7; columna con 70 % numéricos → queda texto; columna de años `"2021","2022"` → int.
 - VC-014 [U] (FR-013, BR-004): celdas `""`, `"-"`, `"s/d"`, `"..."` → `NaN`, nunca 0.
 - VC-015 [U] (FR-014, BR-001): tabla de 3 páginas que repite encabezado → 1 tabla lógica, filas = suma de filas de datos, sin encabezado repetido, `pages=[4,5,6]`.
-- VC-016 [U] (BR-001): continuación sin encabezado (primera fila numérica) → se une; misma página siguiente pero distinta cantidad de columnas → quedan 2 tablas; tabla que no es la primera de la página siguiente → no se une.
+- VC-016 [U] (BR-001): continuación sin encabezado (primera fila numérica) → se une; misma página siguiente pero distinta cantidad de columnas → quedan 2 tablas; tabla que no es la primera de la página siguiente → no se une; primera tabla de la página siguiente con mismo encabezado y columnas pero con epígrafe propio ("Cuadro 2.3 …") encima → no se une.
 - VC-017 [U] (FR-015): página sin texto (solo imagen) → aviso `"sin capa de texto"` con su número; 0 tablas de esa página.
 - VC-018 [U] (FR-016): página con imagen del 30 % del área → aviso `"imagen grande no procesada…"`; imagen del 10 % → sin aviso.
 - VC-019 [U] (FR-017, BR-005): tabla de 1 fila de datos / 1 columna / 70 % vacía → descartada con aviso; tabla de 2×2 completa → conservada.
@@ -343,6 +343,7 @@ Ninguna.
 
 ## 11. Changelog
 
+- 0.6 (2026-10-07): BR-001 incorpora la excepción por epígrafe propio (D-015, ratificada por el usuario); VC-016 agrega ese caso.
 - 0.5 (2026-10-07): se resuelve la pregunta abierta de los PDFs de muestra con los PDFs provistos por el usuario: dos informes de la EPH de INDEC (2.º trimestre de 2025 y de 2026, completos) y un extracto de 10 páginas del Anuario Estadístico 2025 de CEPAL (población y trabajo, con la tabla multipágina). Afecta FR-070 (archivos y URLs), §9 (se quita la pregunta) y A-4 (validada).
 - 0.4 (2026-10-07): se resuelve la pregunta abierta de modelos con `notebooks/00_litellm_exploracion.ipynb`: `LLM_MODEL=gpt-5.4-mini` (`temperature=0`), `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIM=1536`. Afecta §7.1, §9 (se quita la pregunta de modelos) y A-5. NFR-003: la regex de secretos se escribe con clases `[_]` (equivalente) para que el propio documento no coincida con ella.
 - 0.3 (2026-10-07): almacén de tablas en Parquet (`pyarrow`) en lugar de CSV, por pedido del usuario: preserva dtypes sin reinferirlos. Afecta FR-023, FR-042, FR-074, BR-012, BR-013, §7.1–7.4, VC-025, VC-056, VC-064.
