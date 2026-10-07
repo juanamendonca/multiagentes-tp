@@ -1,11 +1,16 @@
-"""Tablas y registros de ejemplo para tests (sin red ni PDFs)."""
+"""Tablas, registros, metadatos y ``Settings`` de ejemplo para tests (sin red ni PDFs)."""
 
 from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from agents.ingestion.schemas import ColumnMeta, TableRecord, TableSource
+from agents.ingestion.schemas import ColumnMeta, TableEnrichment, TableRecord, TableSource
+from agents.ingestion.validation import row_header_candidates, semantic_dtype
+from services.config import Settings
 from services.table_store import make_table_id
 
 DOC_HASH = "0123456789abcdef" + "0" * 48
@@ -47,3 +52,37 @@ def sample_record(
     }
     fields.update(overrides)
     return TableRecord.model_validate(fields)
+
+
+def fake_settings(tables_dir: Path, **overrides: Any) -> Settings:
+    """``Settings`` de test (sin red): embeddings de dimensión 8 y trazas desactivadas."""
+    fields: dict[str, Any] = {
+        "litellm_base_url": "http://litellm.invalid",
+        "litellm_api_key": "test-key",
+        "llm_model": "fake-model",
+        "embedding_model": "fake-embeddings",
+        "embedding_dim": 8,
+        "pinecone_api_key": "test-pinecone",
+        "langsmith_api_key": "test-langsmith",
+        "langsmith_project": "test-project",
+        "langsmith_tracing": False,
+        "tables_dir": Path(tables_dir),
+    }
+    fields.update(overrides)
+    return Settings(**fields)
+
+
+def valid_enrichment(df: pd.DataFrame, **overrides: Any) -> TableEnrichment:
+    """``TableEnrichment`` que cumple BR-007 para ``df`` (nombres exactos, dtypes compatibles,
+    rótulos de la primera columna de texto, 2 oraciones)."""
+    fields: dict[str, Any] = {
+        "name": "Tabla de prueba",
+        "description": "Muestra datos de prueba. Los valores son ficticios.",
+        "columns": [
+            ColumnMeta(name=str(c), description=f"Columna {c}", dtype=semantic_dtype(df[c]), unit=None)
+            for c in df.columns
+        ],
+        "row_headers": row_header_candidates(df),
+    }
+    fields.update(overrides)
+    return TableEnrichment(**fields)

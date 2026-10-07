@@ -19,7 +19,7 @@ from langchain_core.caches import RETURN_VAL_TYPE, BaseCache
 from langchain_core.globals import set_llm_cache
 from langchain_core.load import dumps, loads
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 
 from services.config import Settings
 
@@ -95,7 +95,7 @@ class SQLiteCache(BaseCache):
             return None
 
     def update(self, prompt: str, llm_string: str, return_val: Sequence[Any]) -> None:
-        payload = dumps(list(return_val))
+        payload = dumps([_serializable_generation(g) for g in return_val])
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO llm_cache (prompt, llm_string, response) VALUES (?, ?, ?)",
@@ -105,6 +105,21 @@ class SQLiteCache(BaseCache):
     def clear(self, **kwargs: Any) -> None:
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM llm_cache")
+
+
+def _serializable_generation(generation: Any) -> Any:
+    """Copia de la generación apta para ``loads(allowed_objects="core")`` (D-025).
+
+    Con salida estructurada (``method="json_schema"``) ``ChatOpenAI`` deja el objeto Pydantic
+    parseado en ``message.additional_kwargs["parsed"]``, que ``dumps`` serializa como
+    ``not_implemented`` y ``loads`` no puede reconstruir: la entrada nunca servía como hit. Se
+    guarda como ``dict`` (el parser de ``langchain-openai`` acepta ``parsed`` dict)."""
+    message = getattr(generation, "message", None)
+    parsed = getattr(message, "additional_kwargs", {}).get("parsed") if message is not None else None
+    if not isinstance(parsed, BaseModel):
+        return generation
+    kwargs = {**message.additional_kwargs, "parsed": parsed.model_dump(mode="json")}
+    return generation.model_copy(update={"message": message.model_copy(update={"additional_kwargs": kwargs})})
 
 
 def enable_cache_if_configured(

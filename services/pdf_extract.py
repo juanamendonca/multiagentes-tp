@@ -112,6 +112,15 @@ class PageText:
     has_text: bool
     large_image_fraction: float
 
+    def trace_summary(self) -> dict[str, object]:
+        """Resumen para trazas (sin el texto de los bloques)."""
+        return {
+            "number": self.number,
+            "n_blocks": len(self.blocks),
+            "has_text": self.has_text,
+            "large_image_fraction": round(self.large_image_fraction, 3),
+        }
+
 
 @dataclass(frozen=True)
 class LoadedPdf:
@@ -154,6 +163,10 @@ class RawTable:
     def ref(self) -> str:
         """Referencia corta y estable para avisos: ``p<primera página>-t<índice>``."""
         return f"p{self.pages[0]:03d}-t{self.index_on_page}"
+
+    def trace_summary(self) -> dict[str, object]:
+        """Resumen para trazas (sin los datos)."""
+        return {"ref": self.ref, "pages": self.pages, "shape": list(self.df.shape), "columns": self.header}
 
 
 @dataclass

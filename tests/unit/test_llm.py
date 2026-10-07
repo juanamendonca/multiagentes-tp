@@ -119,3 +119,29 @@ def test_scripted_fake_structured_output_and_call_log() -> None:
     assert fake.calls == ["primero", "segundo con feedback"]
     with pytest.raises(AssertionError):
         structured.invoke("tercero")
+
+
+def test_cache_hits_structured_output_with_parsed_pydantic_object(tmp_path: Path) -> None:
+    """Una generación de salida estructurada (``additional_kwargs["parsed"]`` = objeto Pydantic,
+    como la deja ``ChatOpenAI`` con ``json_schema``) se guarda de forma recargable: el lookup
+    devuelve la generación con ``parsed`` como dict y el parser de langchain-openai la acepta
+    (D-025)."""
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration
+    from langchain_openai.chat_models.base import _oai_structured_outputs_parser
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        answer: str
+
+    cache = SQLiteCache(tmp_path / "cache.db")
+    message = AIMessage(content='{"answer":"Hola"}', additional_kwargs={"parsed": Answer(answer="Hola")})
+    cache.update("prompt", "llm", [ChatGeneration(message=message)])
+
+    cached = cache.lookup("prompt", "llm")
+
+    assert cached is not None
+    restored = cached[0].message
+    assert restored.additional_kwargs["parsed"] == {"answer": "Hola"}
+    assert _oai_structured_outputs_parser(restored, schema=Answer) == Answer(answer="Hola")
+    assert isinstance(message.additional_kwargs["parsed"], Answer)  # el original no se modifica

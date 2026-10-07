@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.6 |
+| Versión | 0.7 |
 | Última actualización | 2026-10-07 |
 | Estado | Draft |
 | Owner | jmendoncag |
@@ -210,7 +210,7 @@ Estado del grafo de Ingesta (`TypedDict`): `file_name`, `pdf_bytes`, `doc_hash`,
 ### 7.4 Registro en Pinecone
 
 - **id:** `table_id`; **namespace:** default; **vector:** embedding de BR-009.
-- **metadata:** `table_id`, `doc_hash`, `name`, `description`, `columns_json` (JSON string de `ColumnMeta[]`), `row_headers` (list[str], truncada), `file_name`, `pages` (list[int]), `section`, `n_rows`, `n_cols`, `preview_csv` (primeras 5 filas serializadas como texto CSV, solo para el prompt de selección), `metadata_quality`, `embedding_text`.
+- **metadata:** `table_id`, `doc_hash`, `name`, `description`, `columns_json` (JSON string de `ColumnMeta[]`), `row_headers` (list[str], truncada), `file_name`, `pages` (list[str] — Pinecone solo admite listas de strings en metadata; se decodifica a `list[int]` al leer), `section` (`""` si no hay), `n_rows`, `n_cols`, `preview_csv` (primeras 5 filas serializadas como texto CSV, solo para el prompt de selección), `metadata_quality`, `embedding_text`.
 
 ### 7.5 Modelos del Analista (Pydantic)
 
@@ -343,6 +343,7 @@ Ninguna.
 
 ## 11. Changelog
 
+- 0.7 (2026-10-07): §7.4 corrige el tipo de `pages` en la metadata de Pinecone (list[str], restricción de Pinecone; D-018).
 - 0.6 (2026-10-07): BR-001 incorpora la excepción por epígrafe propio (D-015, ratificada por el usuario); VC-016 agrega ese caso.
 - 0.5 (2026-10-07): se resuelve la pregunta abierta de los PDFs de muestra con los PDFs provistos por el usuario: dos informes de la EPH de INDEC (2.º trimestre de 2025 y de 2026, completos) y un extracto de 10 páginas del Anuario Estadístico 2025 de CEPAL (población y trabajo, con la tabla multipágina). Afecta FR-070 (archivos y URLs), §9 (se quita la pregunta) y A-4 (validada).
 - 0.4 (2026-10-07): se resuelve la pregunta abierta de modelos con `notebooks/00_litellm_exploracion.ipynb`: `LLM_MODEL=gpt-5.4-mini` (`temperature=0`), `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIM=1536`. Afecta §7.1, §9 (se quita la pregunta de modelos) y A-5. NFR-003: la regex de secretos se escribe con clases `[_]` (equivalente) para que el propio documento no coincida con ella.
