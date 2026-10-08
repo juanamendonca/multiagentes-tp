@@ -16,6 +16,7 @@ pyarrow==25.0.1
 pydantic==2.13.5
 python-dotenv==1.2.4
 pyyaml==6.0.3
+psutil==7.2.2
 
 # UI
 streamlit==1.65.0

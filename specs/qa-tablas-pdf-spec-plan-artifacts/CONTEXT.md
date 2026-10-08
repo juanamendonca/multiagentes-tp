@@ -1,19 +1,20 @@
 # CONTEXT — estado actual del código
 
-Última actualización: Iteración 5 (grafo de Ingesta). Rama de trabajo: `feat/qa-tablas`.
+Última actualización: Iteración 6 (sandbox). Rama de trabajo: `feat/qa-tablas`.
 
 ## Current state
 
-- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (195 tests, sin red, ~6 s). `pytest -m integration` (14 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) y `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s); los dos últimos usan un índice efímero propio (D-019).
+- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (256 tests, sin red, ~30–45 s: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno). `pytest -m integration` (14 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) y `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s); los dos últimos usan un índice efímero propio (D-019).
 - **Ingesta de punta a punta** (`agents/ingestion/`): `StateGraph` `load_pdf → extract_tables → collect_context → enrich ⇄ validate → (repair) → index` con reintentos por tabla (D-021), reparación BR-008, indexación idempotente (D-020/D-023) y trazas LangSmith `ingestion:<archivo>` con metadata final (D-022). CLI `python -m agents.ingestion <pdf>...`; interfaz `ingest_pdf` / `run_ingestion(..., on_update)`.
 - **Índice de producción `mas-2026s2-tables` creado y cargado**: 33 vectores = 33 tablas de los 3 PDFs de muestra (INDEC 2T2026: 16, INDEC 2T2025: 12, CEPAL: 5), todas `metadata_quality="ok"` al primer intento; `data/tables/` tiene sus 33 `.parquet` + 33 `.json` (gitignored). Inventario en `iterations/05-ingestion-graph.md`.
 - Servicios de base: `config`/`llm` (LiteLLM, caché SQLite que ahora sí funciona con salida estructurada, D-025), `table_parsing`, `pdf_extract`, `pdf_context`, `table_store`, `vectorstore`, `tracing`.
-- Todavía no hay Analista, sandbox ni UI.
+- **Sandbox de ejecución** (`services/sandbox.py`, independiente de los agentes): chequeo AST, subproceso `python -I -X utf8` con cwd temporal que solo tiene los Parquet seleccionados (`t1.parquet`…), entorno mínimo, preámbulo que carga `tables` y después bloquea `open`/sockets, timeout con muerte del árbol de procesos y salida acotada; `parse_result_line` valida el contrato §7.6 (D-026..D-028). Probado también a mano con un Parquet real de INDEC.
+- Todavía no hay Analista (Iteraciones 7–8) ni UI.
 
 ## File map
 
 ```
-requirements.txt          dependencias directas fijadas con == (D-002); langgraph==1.2.14, pinecone==10.0.0
+requirements.txt          dependencias directas fijadas con == (D-002); langgraph==1.2.14, pinecone==10.0.0, psutil==7.2.2
 ruff.toml / pytest.ini    lint (py311, 110 cols, E,F,I,UP,B) / tests (marker `integration`, pythonpath=.)
 .env.example              variables de §7.1 sin valores
 .gitignore                .env, .venv, caches, data/tables/, .langchain.db
@@ -33,6 +34,9 @@ services/vectorstore.py   VectorStore (Protocol), PineconeVectorStore, ensure_in
                           build_vector_records, upsert_records, delete_stale, query, count_vectors, format_pages,
                           VectorRecord, Match, IndexDimensionMismatch, IndexingError, MetadataTooLarge
 services/tracing.py       make_trace_setup, TraceSetup, RootMetadataTracer, make_langsmith_client, sanitize_for_trace
+services/sandbox.py       check_code, build_preamble, run_in_sandbox, parse_result_line, ExecutionResult, ParsedOutput,
+                          ResultItem, MissingItem, OutputContractError, summarize_stderr, ALLOWED_IMPORTS,
+                          FORBIDDEN_NAMES, FORBIDDEN_ATTRIBUTES, MAX_OUTPUT_CHARS, PERMISSION_MESSAGE, ALIAS_RE
 agents/__init__.py, agents/ingestion/__init__.py   paquetes (sin lógica; no importar grafos acá)
 agents/ingestion/schemas.py     ColumnMeta, TableEnrichment, TableSource, TableRecord (+ IngestionWarning)
 agents/ingestion/state.py       IngestionState (TypedDict), TableDraft, DraftStatus, IngestionStatus
@@ -56,12 +60,13 @@ tests/unit/test_table_store.py, test_vectorstore.py   VC-004, VC-025, VC-026, VC
 tests/unit/test_ingestion_validate.py  VC-022 (BR-007) + BR-008
 tests/unit/test_ingestion_graph.py     VC-023, VC-024, VC-025 (index), VC-030..VC-033, NFR-007, FR-024, stream
 tests/unit/test_tracing.py             mecanismo de FR-060 con cliente LangSmith fake, saneado, trazas apagadas
+tests/unit/test_sandbox.py             VC-046, VC-048, VC-060..VC-065, NFR-004 (subprocesos reales, Parquet generados)
 tests/integration/test_sample_pdfs.py  VC-090 (técnica), VC-015 sobre PDFs reales (sin red)
 tests/integration/test_pinecone.py     VC-003, VC-027 (vectorstore), NFR-005 reales
 tests/integration/test_ingestion_real.py  VC-021, VC-027 (reingesta real), VC-080
 ```
 
-Layout futuro fijado por el plan: `app.py`, `agents/analyst/`, `services/sandbox.py`, `ui/`, `eval/`.
+Layout futuro fijado por el plan: `app.py`, `agents/analyst/`, `ui/`, `eval/`.
 
 ## Public interfaces
 
@@ -138,6 +143,25 @@ def repair_enrichment(last, df, *, file_name, first_page, index_on_page, context
 def build_enrich_messages(draft, file_name, feedback=()) -> list[BaseMessage]
 ```
 
+```python
+# services/sandbox.py  (BR-012, BR-013, §7.6, §7.7; D-026..D-028)
+def check_code(code: str) -> list[str]          # motivos de rechazo en español con "(línea N)"; [] = aceptado
+def build_preamble(aliases: Mapping[str, str]) -> str   # {"t1": "t1.parquet"} → define pd, np, tables; luego bloquea
+def run_in_sandbox(code, tables: Mapping[str, Path], timeout_s: int, static_check: bool = True, *,
+                   covered_part_ids: Sequence[str] | None = None) -> ExecutionResult
+    # tables = {"t1": store.parquet_path(id1), "t2": ...}; alias ^t[1-9]\d*$; Parquet inexistente → FileNotFoundError
+class ExecutionResult(BaseModel, frozen): status: "ok"|"error"|"timeout"|"rejected"|"invalid_output"; stdout; stderr;
+    returncode: int|None; duration_s; stdout_truncated; stderr_truncated; parsed: ParsedOutput|None; error: str|None;
+    rejected_reasons: list[str]; pid; killed_pids      # .ok (status == "ok"), .truncated
+def parse_result_line(stdout: str, covered_part_ids: Iterable[str]) -> ParsedOutput   # OutputContractError(ValueError)
+class ParsedOutput: results: list[ResultItem]; missing: list[MissingItem]; conversions: list[str]
+class ResultItem: part_id; label=""; value: float | list[float] | dict[str, float]; unit: str|None
+class MissingItem: part_id; reason
+def summarize_stderr(stderr, max_chars=300) -> str   # última línea no vacía (p. ej. "KeyError: 'x'")
+```
+
+`status`: `rejected` = no se ejecutó (AST; `pid`/`returncode` `None`); `error` = returncode ≠ 0 (`error` = `"returncode N: <última línea de stderr>"`); `timeout` (`returncode` `None`); `invalid_output` = returncode 0 pero falla §7.6 (solo si se pasó `covered_part_ids`); `ok`. `error` es el texto para el feedback del reintento (FR-037). stdout/stderr guardan los **últimos** 20 000 caracteres.
+
 **Eventos de `stream` (`on_update(nodo, actualización)`; claves que devuelve cada nodo):**
 
 | Nodo | Claves |
@@ -175,6 +199,7 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 - Trazas (D-022): run raíz `ingestion:<archivo>` con `run_id` propio; metadata final vía `RootMetadataTracer`; entradas/salidas saneadas (sin bytes ni DataFrames). Toda dataclass grande que entre al estado de un grafo debería tener `trace_summary()`.
 - Tests contra servicios reales: índice efímero `<PINECONE_INDEX_NAME>-itest-<6 hex>` borrado en `finally`, `TABLES_DIR` temporal (D-019); nunca escriben en producción. Las trazas de los tests sí van al proyecto real.
 - Encabezados (D-012), separador decimal por documento (D-008), unión multipágina (BR-001 + D-013/D-015), contexto (D-014): sin cambios.
+- **Sandbox (D-026..D-028):** el código generado nunca lee archivos: usa `tables["tN"]` (alias `t1..tn` en el orden de las tablas elegidas), `pd` y `np` del preámbulo; nombres de columna exactos con `df["…"]`. El hijo corre `sys.executable -I -X utf8 <tmp>/main.py` con cwd `<tmp>/work/` (solo `tN.parquet`), entorno `PATH`+`SYSTEMROOT`+`SYSTEMDRIVE`+`TEMP`/`TMP` propios; al timeout se mata el árbol con `psutil` (en Windows el `python.exe` del venv es un lanzador). `static_check=False` solo en tests. No es una frontera de seguridad del SO (README final).
 
 ## Commands
 
@@ -184,6 +209,8 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 # tests unitarios (sin red) y lint
 .venv\Scripts\python -m pytest -m "not integration"
 .venv\Scripts\ruff check .
+# tests del sandbox (sin red; lanza subprocesos reales, ~20–30 s)
+.venv\Scripts\python -m pytest tests/unit/test_sandbox.py -v
 # tests del grafo de ingesta (sin red)
 .venv\Scripts\python -m pytest tests/unit/test_ingestion_validate.py tests/unit/test_ingestion_graph.py -v
 # integración: ingesta real (LLM + Pinecone efímero + LangSmith, ~35 s; usar caché)
@@ -203,7 +230,8 @@ git ls-files .env
 
 ## Known gaps
 
-- Analista (Iteraciones 6–8), UI (9: mostrar `IngestionResult`, FR-025 con vista previa vía `TableStore.load_table`, FR-004 al arrancar con `ensure_index`), evaluación (10). `run_url` de LangSmith: hoy solo `run_id`.
+- Sandbox listo pero sin consumidor: el prompt de codegen y el nodo `execute` llegan en la Iteración 8 (texto sugerido para el prompt en `iterations/06-sandbox.md`). Límites conocidos del sandbox: sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store).
+- Analista (Iteraciones 7–8), UI (9: mostrar `IngestionResult`, FR-025 con vista previa vía `TableStore.load_table`, FR-004 al arrancar con `ensure_index`), evaluación (10). `run_url` de LangSmith: hoy solo `run_id`.
 - `.env` tiene `LLM_CACHE=false`; para desarrollo exportar `LLM_CACHE=true` (el proceso gana sobre `.env`). El nombre de archivo va en el prompt de `enrich`: reingerir con otro nombre no usa la caché. `IngestionResult.llm_calls` cuenta invocaciones (incluidas las servidas por la caché).
 - Metadatos reales (revisados a mano, ver record 05): nombres a veces sin período (las dos EPH tienen "Principales tasas del mercado de trabajo"; el período está en la descripción, la sección y las columnas), abreviaturas ("ALC", "2T 2026"); columnas trimestrales de INDEC con mezcla de unidades por fila en el Cuadro 1.3 ("miles de personas o %"); filas de subtítulo de INDEC (`"Sexo y grupos de edad"`) aparecen en `row_headers`; CEPAL tiene notas pegadas a rótulos (`"Argentinab"`) y columnas `Country`/`Age` en inglés; tablas sin encabezado de primera columna quedan `col_0`/`col_4`.
 - Sección errónea en EPH 2T2025 p004 (resumen ejecutivo): "Dentro de la población ocupada (44,5%) se destacó que:" (bloque en negrita, D-014) y una fila sin rótulo.
