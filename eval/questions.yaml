@@ -1,0 +1,210 @@
+# Set de preguntas de prueba (spec FR-071). Las respuestas esperadas se calcularon a mano a
+# partir del texto de los PDFs de data/sample_pdfs/ (leído con PyMuPDF, page.get_text()), no de
+# la salida del sistema; `notes` cita página (1-based, del archivo), cuadro, fila y columna.
+#
+# Esquema por pregunta:
+#   id               identificador estable (q01…)
+#   question         pregunta en español, tal cual se le hace al Analista
+#   kind             etiquetas descriptivas (single_table, multitable, scale_conversion,
+#                    missing_period, external_conversion, missing_comparison, no_related_table,
+#                    partial, retrieval_gap, multipage)
+#   expected_status  answered | partial | cannot_answer
+#   expected_answer  null, o lista de valores esperados {label, value, unit, abs?}; con abs: true
+#                    se compara el valor absoluto (variaciones que el sistema puede informar
+#                    como "bajó 0,5")
+#   tolerance        tolerancia absoluta para cada valor (misma unidad que `value`)
+#   expected_tables  [{file, pages}] tablas que contienen los datos (o la tabla relacionada si
+#                    el dato falta); `pages` lista las páginas de los cuadros equivalentes de ese
+#                    PDF (cualquiera sirve); [] = ninguna tabla relacionada
+#   vc               criterios de verificación de la spec que ejercita la pregunta (opcional)
+#   notes            de dónde sale cada valor y la cuenta
+
+questions:
+  - id: q01
+    question: >-
+      ¿Cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre
+      de 2026 y cuánto cambió, en puntos porcentuales, respecto del 2° trimestre de 2025?
+    kind: [single_table]
+    expected_status: answered
+    expected_answer:
+      - {label: "Tasa de desocupación 2T2026", value: 7.9, unit: "%"}
+      - {label: "Cambio vs 2T2025", value: 0.3, unit: "p.p.", abs: true}
+    tolerance: 0.05
+    expected_tables:
+      - {file: indec_eph_mercado_trabajo_2t2026.pdf, pages: [8]}
+    notes: >-
+      EPH 2T2026 pág. 8, Cuadro 1.3, fila "Tasa de desocupación": 2T2025 = 7,6 y 2T2026* = 7,9.
+      Cambio = 7,9 − 7,6 = +0,3 p.p.
+
+  - id: q02
+    question: >-
+      ¿Cuál fue la tasa de desocupación del Gran Buenos Aires en el 2° trimestre de 2025 y en
+      el 2° trimestre de 2026, y cuántos puntos porcentuales varió entre ambos?
+    kind: [multitable]
+    expected_status: answered
+    expected_answer:
+      - {label: "GBA 2T2025", value: 8.7, unit: "%"}
+      - {label: "GBA 2T2026", value: 8.2, unit: "%"}
+      - {label: "Variación", value: -0.5, unit: "p.p.", abs: true}
+    tolerance: 0.05
+    expected_tables:
+      - {file: indec_eph_mercado_trabajo_2t2025.pdf, pages: [15, 18]}
+      - {file: indec_eph_mercado_trabajo_2t2026.pdf, pages: [17, 20]}
+    notes: >-
+      EPH 2T2025 pág. 15, Cuadro 2, fila "Gran Buenos Aires", columna Desocupación = 8,7 (igual
+      en pág. 18, Cuadro 3.3). EPH 2T2026 pág. 17, Cuadro 3.1, fila "Gran Buenos Aires",
+      columna Desocupación = 8,2 (igual en pág. 20). Variación = 8,2 − 8,7 = −0,5 p.p. Cualquiera
+      de los dos cuadros de cada edición sirve.
+
+  - id: q03
+    question: >-
+      ¿Cuántas personas desocupadas había en el total de 31 aglomerados urbanos en el 2°
+      trimestre de 2026? Expresalo en millones de personas.
+    kind: [single_table, scale_conversion]
+    expected_status: answered
+    expected_answer:
+      - {label: "Desocupados 2T2026", value: 1.164, unit: "millones de personas"}
+    tolerance: 0.0005
+    expected_tables:
+      - {file: indec_eph_mercado_trabajo_2t2026.pdf, pages: [8]}
+    notes: >-
+      EPH 2T2026 pág. 8, Cuadro 1.3, fila "Población desocupada" (en miles), 2T2026* = 1.164
+      miles = 1,164 millones (conversión de escala permitida, BR-016). Igual en pág. 19, Cuadro
+      3.3, fila "Total 31 aglomerados urbanos", columna Desocupada = 1.164.
+
+  - id: q04
+    question: >-
+      Según la CEPAL, ¿cuál fue la tasa media anual de desocupación abierta de Argentina en 2024?
+      Según el INDEC, ¿cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el
+      2° trimestre de 2025? ¿Cuántos puntos porcentuales de diferencia hay entre ambas?
+    kind: [multitable]
+    expected_status: answered
+    expected_answer:
+      - {label: "CEPAL Argentina 2024", value: 7.2, unit: "%"}
+      - {label: "INDEC 31 aglomerados 2T2025", value: 7.6, unit: "%"}
+      - {label: "Diferencia", value: 0.4, unit: "p.p.", abs: true}
+    tolerance: 0.05
+    expected_tables:
+      - {file: cepal_anuario_estadistico_2025_poblacion_trabajo.pdf, pages: [8]}
+      - {file: indec_eph_mercado_trabajo_2t2025.pdf, pages: [8]}
+    notes: >-
+      CEPAL pág. 8, cuadro 1.2.1 (2024), fila "Argentina" (nota b: áreas urbanas), columna "Tasa
+      media anual de desocupación abierta" = 7.2. EPH 2T2025 pág. 8, Cuadro 1.3, fila "Tasa de
+      desocupación", 2T2025 = 7,6 (también pág. 15, Cuadro 2, y EPH 2T2026 pág. 8, columna
+      2T2025). Diferencia = 7,6 − 7,2 = 0,4 p.p. Combina las dos publicaciones.
+
+  - id: q05
+    question: >-
+      ¿Cuántas personas desocupadas había en el Gran Buenos Aires en el 2° trimestre de 2025 y
+      en el 2° trimestre de 2026, y cuál fue la diferencia?
+    kind: [multitable, retrieval_gap]
+    expected_status: answered
+    expected_answer:
+      - {label: "Desocupados GBA 2T2025", value: 683, unit: "miles de personas"}
+      - {label: "Desocupados GBA 2T2026", value: 656, unit: "miles de personas"}
+      - {label: "Diferencia", value: -27, unit: "miles de personas", abs: true}
+    tolerance: 0.5
+    expected_tables:
+      - {file: indec_eph_mercado_trabajo_2t2025.pdf, pages: [17]}
+      - {file: indec_eph_mercado_trabajo_2t2026.pdf, pages: [19]}
+    notes: >-
+      EPH 2T2025 pág. 17, Cuadro 3.2 (en miles), fila "Gran Buenos Aires", columna Desocupada =
+      683. EPH 2T2026 pág. 19, Cuadro 3.3 (en miles), fila "Gran Buenos Aires", columna
+      Desocupada = 656. Diferencia = 656 − 683 = −27 miles. Caso honesto con falla conocida de
+      recuperación: en el desarrollo la tabla de pág. 19 ("Población de referencia por región")
+      no aparecía entre las candidatas.
+
+  - id: q06
+    question: >-
+      ¿Qué región tuvo el mayor desempleo en 2023 y cuánto superó al promedio nacional?
+    kind: [missing_period]
+    expected_status: cannot_answer
+    expected_answer: null
+    tolerance: 0
+    expected_tables:
+      - {file: indec_eph_mercado_trabajo_2t2026.pdf, pages: [17, 20]}
+      - {file: indec_eph_mercado_trabajo_2t2025.pdf, pages: [15, 18]}
+    vc: [VC-053]
+    notes: >-
+      Las tablas regionales cubren solo el 2T2025 (EPH 2T2025 pág. 15) y el 2T2026 (EPH 2T2026
+      pág. 17); los cuadros con serie trimestral (pág. 8 de cada informe) van del 2T2024 al
+      2T2026 y no son regionales. No hay datos de 2023: no se interpola ni se usa el año más
+      cercano. La respuesta debe nombrar el período faltante.
+
+  - id: q07
+    question: >-
+      ¿Cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre
+      de 2024 y en el 2° trimestre de 2023?
+    kind: [missing_period, partial]
+    expected_status: partial
+    expected_answer:
+      - {label: "Tasa de desocupación 2T2024", value: 7.6, unit: "%"}
+    tolerance: 0.05
+    expected_tables:
+      - {file: indec_eph_mercado_trabajo_2t2025.pdf, pages: [8]}
+    vc: [VC-053]
+    notes: >-
+      EPH 2T2025 pág. 8, Cuadro 1.3, fila "Tasa de desocupación", columna "Año 2024 - 2°
+      trimestre" = 7,6. El 2T2023 no está en ningún PDF (la serie empieza en el 2T2024): esa
+      parte debe quedar missing nombrando el período, sin valor interpolado.
+
+  - id: q08
+    question: >-
+      ¿Qué porcentaje de la población mundial representaba la población total de Argentina en
+      2025?
+    kind: [external_conversion]
+    expected_status: cannot_answer
+    expected_answer: null
+    tolerance: 0
+    expected_tables:
+      - {file: cepal_anuario_estadistico_2025_poblacion_trabajo.pdf, pages: [3, 4]}
+    vc: [VC-054]
+    notes: >-
+      CEPAL pág. 3, cuadro 1.1.1 (multipágina, págs. 3–4), fila "Argentina": población total
+      2025 = 45 851.4 miles. La población mundial no está en ninguna tabla (solo América Latina y
+      el Caribe = 667 888.6 miles, pág. 4): la conversión necesita un dato externo (BR-014). Los
+      PDFs no tienen montos en pesos, así que el caso "pesos → USD" de VC-054 se reemplaza por
+      esta conversión que también requiere un dato externo.
+
+  - id: q09
+    question: >-
+      ¿Cuál fue la tasa media anual de desocupación abierta de Colombia en 2024 y cuántos puntos
+      porcentuales superó al promedio de los países del Caribe?
+    kind: [missing_comparison, partial]
+    expected_status: partial
+    expected_answer:
+      - {label: "Desocupación Colombia 2024", value: 10.2, unit: "%"}
+    tolerance: 0.05
+    expected_tables:
+      - {file: cepal_anuario_estadistico_2025_poblacion_trabajo.pdf, pages: [8]}
+    vc: [VC-055]
+    notes: >-
+      CEPAL pág. 8, cuadro 1.2.1, fila "Colombia", columna "Tasa media anual de desocupación
+      abierta" = 10.2. El cuadro solo trae el agregado "América Latina y el Caribe" (5.8,
+      promedio ponderado); no hay promedio del Caribe. No debe calcularse como promedio de los
+      países caribeños listados (Bahamas, Barbados, Belice, Jamaica, Trinidad y Tabago, Santa
+      Lucía): falta el valor de comparación (BR-014).
+
+  - id: q10
+    question: ¿Cuántos goles hizo Messi en el Mundial de Qatar 2022?
+    kind: [no_related_table]
+    expected_status: cannot_answer
+    expected_answer: null
+    tolerance: 0
+    expected_tables: []
+    notes: Ningún PDF trata de fútbol; no hay tabla relacionada.
+
+  - id: q11
+    question: >-
+      Según la CEPAL, ¿cuál era la población total de Uruguay en 2025, en millones de personas?
+    kind: [single_table, scale_conversion, multipage]
+    expected_status: answered
+    expected_answer:
+      - {label: "Población Uruguay 2025", value: 3.3847, unit: "millones de personas"}
+    tolerance: 0.0005
+    expected_tables:
+      - {file: cepal_anuario_estadistico_2025_poblacion_trabajo.pdf, pages: [3, 4]}
+    notes: >-
+      CEPAL pág. 4 (continuación del cuadro 1.1.1, que empieza en pág. 3), fila "Uruguay",
+      columna "Población total (en miles de personas a mitad de año)" 2025 = 3 384.7 miles =
+      3,3847 millones. Ejercita la tabla multipágina (la fila está en la segunda página).

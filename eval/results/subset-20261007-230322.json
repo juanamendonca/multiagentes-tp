@@ -1,0 +1,164 @@
+{
+  "meta": {
+    "date": "2026-10-07 23:03",
+    "model": "gpt-5.4-mini",
+    "llm_cache": "false",
+    "max_code_retries": 3,
+    "retrieval_top_k": 5,
+    "questions": [
+      "q05",
+      "q07"
+    ],
+    "tag": null
+  },
+  "summary": {
+    "n": 2,
+    "n_correct": 1,
+    "accuracy": 0.5,
+    "n_status_ok": 1,
+    "latency_median_s": 17.784438150003552,
+    "latency_max_s": 19.121027500004857,
+    "llm_calls_max": 4,
+    "llm_calls_total": 8,
+    "embedding_calls_max": 1,
+    "retries_total": 0,
+    "max_llm_calls_allowed": 7,
+    "nfr006_ok": true,
+    "nfr009_ok": true,
+    "nfr012_ok": false
+  },
+  "outcomes": [
+    {
+      "id": "q05",
+      "question": "¿Cuántas personas desocupadas había en el Gran Buenos Aires en el 2° trimestre de 2025 y en el 2° trimestre de 2026, y cuál fue la diferencia?",
+      "kind": [
+        "multitable",
+        "retrieval_gap"
+      ],
+      "vc": [],
+      "expected_status": "answered",
+      "obtained_status": "answered",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "Desocupados GBA 2T2025",
+          "value": 683.0,
+          "unit": "miles de personas",
+          "abs": false
+        },
+        {
+          "label": "Desocupados GBA 2T2026",
+          "value": 656.0,
+          "unit": "miles de personas",
+          "abs": false
+        },
+        {
+          "label": "Diferencia",
+          "value": -27.0,
+          "unit": "miles de personas",
+          "abs": true
+        }
+      ],
+      "tolerance": 0.5,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Personas desocupadas, Gran Buenos Aires, 2° trimestre de 2025 y 2° trimestre de 2026",
+          "value": [
+            683.0,
+            656.0
+          ],
+          "unit": "miles de personas"
+        },
+        {
+          "part_id": "p2",
+          "label": "Diferencia en personas desocupadas, Gran Buenos Aires, 2° trimestre de 2026 menos 2° trimestre de 2025",
+          "value": -27.0,
+          "unit": "miles de personas"
+        }
+      ],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": true,
+      "selected_tables": [
+        {
+          "table_id": "2c14158b26aed2d1-p017-t0",
+          "file": "indec_eph_mercado_trabajo_2t2025.pdf",
+          "pages": [
+            17
+          ]
+        },
+        {
+          "table_id": "b0a700bac4db8192-p019-t0",
+          "file": "indec_eph_mercado_trabajo_2t2026.pdf",
+          "pages": [
+            19
+          ]
+        }
+      ],
+      "missing": [],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 19.121027500004857,
+      "run_id": "e6ff2986-0241-4c24-89d8-1a23ee4eb498",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/e6ff2986-0241-4c24-89d8-1a23ee4eb498?poll=true",
+      "answer": "En el Gran Buenos Aires había 683 miles de personas desocupadas en el 2° trimestre de 2025 y 656 miles en el 2° trimestre de 2026; la diferencia fue de -27 miles de personas. Esto se calculó tomando el valor de cada trimestre en las tablas de las páginas 17 del archivo indec_eph_mercado_trabajo_2t2025.pdf y 19 del archivo indec_eph_mercado_trabajo_2t2026.pdf, y restando 2025 a 2026.",
+      "error": null
+    },
+    {
+      "id": "q07",
+      "question": "¿Cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2024 y en el 2° trimestre de 2023?",
+      "kind": [
+        "missing_period",
+        "partial"
+      ],
+      "vc": [
+        "VC-053"
+      ],
+      "expected_status": "partial",
+      "obtained_status": "cannot_answer",
+      "status_ok": false,
+      "expected_answer": [
+        {
+          "label": "Tasa de desocupación 2T2024",
+          "value": 7.6,
+          "unit": "%",
+          "abs": false
+        }
+      ],
+      "tolerance": 0.05,
+      "obtained": [],
+      "value_ok": false,
+      "correct": false,
+      "tables_ok": null,
+      "selected_tables": [
+        {
+          "table_id": "2c14158b26aed2d1-p012-t0",
+          "file": "indec_eph_mercado_trabajo_2t2025.pdf",
+          "pages": [
+            12
+          ]
+        }
+      ],
+      "missing": [
+        {
+          "part_id": "p1",
+          "reason": "Falta el dato del 2° trimestre de 2023 para el total de 31 aglomerados urbanos; la tabla disponible solo contiene 2° trimestre de 2024 a 2° trimestre de 2025."
+        }
+      ],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 16.447848800002248,
+      "run_id": "8ce2254f-ec6c-40ed-a51e-b0d745541ba6",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/8ce2254f-ec6c-40ed-a51e-b0d745541ba6?poll=true",
+      "answer": "No se puede responder con las tablas disponibles: falta el dato del 2° trimestre de 2023 para el total de 31 aglomerados urbanos. La tabla relacionada de `indec_eph_mercado_trabajo_2t2025.pdf` (pág. 12) cubre 2° trimestre de 2024 a 2° trimestre de 2025, por lo que no incluye 2023.",
+      "error": null
+    }
+  ]
+}

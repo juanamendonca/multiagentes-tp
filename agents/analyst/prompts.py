@@ -47,8 +47,14 @@ Devolvé un plan con 1 a 5 partes. Reglas:
 4. `search_queries`: de 1 a 3 frases cortas en español que describan la TABLA que tendría el dato
    (qué mide, para qué población o región, con qué desagregación y período). No incluyas valores
    numéricos ni la respuesta. Variá el enfoque entre consultas (indicador, desagregación, fuente).
+   Si la parte pide una cantidad de personas (no una tasa ni un porcentaje), al menos una consulta
+   la nombra como población según su condición y unidad, p. ej. "población desocupada (en miles de
+   personas) por región": los informes publican las cantidades y las tasas en cuadros distintos.
 5. Usá ids "p1", "p2", … en el orden en que hay que calcularlas.
-6. No agregues partes que la pregunta no pide ni inventes períodos o entidades.
+6. No agregues partes que la pregunta no pide ni inventes períodos o entidades. Los datos
+   intermedios u operandos de una cuenta no son partes: si piden un porcentaje, cociente o
+   diferencia sin pedir también sus operandos, es una sola parte (si falta un operando, la parte
+   entera queda sin respuesta).
 
 Ejemplo: "¿Cuál fue la tasa de actividad de las mujeres en el 1° trimestre de 2025 y cuántos puntos
 menos que la de los varones?" → p1: tasa de actividad de mujeres en 1T2025 (operation "valor");

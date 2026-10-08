@@ -1,16 +1,17 @@
 # CONTEXT — estado actual del código
 
-Última actualización: Iteración 9 (UI Streamlit). Rama de trabajo: `feat/qa-tablas`.
+Última actualización: Iteración 10 (set de evaluación y corrida). Rama de trabajo: `feat/qa-tablas`.
 
 ## Current state
 
-- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (323 tests, sin red, 43–51 s según la carga del equipo: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno, 2 tests del grafo Analista otros 3, y los 19 de la UI ~3 s con 2 `AppTest`). `pytest -m integration` (20 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s) —estos dos usan un índice efímero propio (D-019)— y `test_analyst_real.py` (LLM real + sandbox; lee el índice de **producción** en solo lectura, ~55–70 s con caché).
+- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (337 tests, sin red, 43–52 s según la carga del equipo (51,3 s en la Iteración 10): los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno, 2 tests del grafo Analista otros 3, y los 19 de la UI ~3 s con 2 `AppTest`). `pytest -m integration` (20 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s) —estos dos usan un índice efímero propio (D-019)— y `test_analyst_real.py` (LLM real + sandbox; lee el índice de **producción** en solo lectura, ~55–70 s con caché).
 - **Ingesta de punta a punta** (`agents/ingestion/`): `StateGraph` `load_pdf → extract_tables → collect_context → enrich ⇄ validate → (repair) → index` con reintentos por tabla (D-021), reparación BR-008, indexación idempotente (D-020/D-023) y trazas LangSmith `ingestion:<archivo>` con metadata final (D-022). CLI `python -m agents.ingestion <pdf>...`; interfaz `ingest_pdf` / `run_ingestion(..., on_update)`.
 - **Índice de producción `mas-2026s2-tables` creado y cargado**: 33 vectores = 33 tablas de los 3 PDFs de muestra (INDEC 2T2026: 16, INDEC 2T2025: 12, CEPAL: 5), todas `metadata_quality="ok"` al primer intento; `data/tables/` tiene sus 33 `.parquet` + 33 `.json` (gitignored). Inventario en `iterations/05-ingestion-graph.md`.
 - Servicios de base: `config`/`llm` (LiteLLM, caché SQLite que ahora sí funciona con salida estructurada, D-025), `table_parsing`, `pdf_extract`, `pdf_context`, `table_store`, `vectorstore`, `tracing`.
 - **Sandbox de ejecución** (`services/sandbox.py`, independiente de los agentes): chequeo AST, subproceso `python -I -X utf8` con cwd temporal que solo tiene los Parquet seleccionados (`t1.parquet`…), entorno mínimo, preámbulo que carga `tables` y después bloquea `open`/sockets, timeout con muerte del árbol de procesos y salida acotada; `parse_result_line` valida el contrato §7.6 (D-026..D-028). Probado también a mano con un Parquet real de INDEC.
 - **Analista de punta a punta** (`agents/analyst/`): `StateGraph` `understand_query → retrieve → select_tables → generate_code → execute → decide_status → respond` con atajos `retrieve → decide_status` (sin candidatas, FR-032), `select_tables → decide_status` (ninguna parte `covered`, FR-034) y el ciclo `execute → generate_code` mientras la ejecución falle y queden intentos (FR-037, ≤ `1 + MAX_CODE_RETRIES`; al agotar, FR-038). Plan estructurado (FR-030), recuperación con 1 llamada de embeddings y dedupe por score máximo (D-029), descarte de candidatas sin Parquet (FR-042), selección con metadatos + `preview_csv` (D-030; puede combinar tablas, D-034), codegen con columnas exactas/dtypes/unidades/primera columna fila por fila/`df.head(5)` (FR-035, D-033), ejecución en el sandbox real con validación §7.6 (FR-036), feedback de error en reintentos (D-032), estado determinístico `decide_status` (BR-015) y respuesta en español con resultados, tablas + páginas, conversiones y explicación del cálculo (FR-040/041). Trazas `analyst:<60 chars>` con `status`, `selected_table_ids`, `code_attempts` y un span por cada `generate_code`/`execute` (VC-081, verificado en LangSmith real). CLI `python -m agents.analyst "<pregunta>"` (muestra también código y ejecución); interfaz `ask` / `run_analyst(..., on_update)`.
 - **UI Streamlit** (`app.py` + `ui/`): pestañas Subir PDF (ingesta con el nodo en curso y contadores en vivo, resumen FR-025 por tabla, avisos, `degraded`, FR-026/027/029), Explorar tablas (catálogo de `TABLES_DIR` por documento, tabla completa, conteo de vectores, borrado de documento con confirmación) y Preguntar (chat de sesión con badge de estado, valores, faltantes, tablas elegidas con datos, código, salida, reintentos y link a la traza de LangSmith). Config incompleta (FR-002), dimensión del índice (FR-004), errores de servicios (FR-054) y validación de preguntas (FR-056) manejados sin tracebacks. Verificada a mano contra producción (record 09, capturas en `screenshots/`).
+- **Evaluación** (`eval/`): 11 preguntas en `eval/questions.yaml` con estado y valores esperados calculados a mano desde el texto de los PDFs (FR-071) y runner `python -m eval.run_eval` (FR-072) que escribe `eval/results/latest.json` y la sección generada de `EVALUATION.md`. Dos corridas medidas con `LLM_CACHE=false` (record 10): 9/11 = 81,8 % en ambas (NFR-012 ≥ 75 % alcanzado), mediana 13,9 / 15,2 s y máximo 19,0 / 19,9 s (NFR-009), ≤ 5 / ≤ 4 llamadas de chat y 1 de embeddings por pregunta (NFR-006). Entre corridas, una ronda de ajuste del prompt de `understand_query` (D-040).
 - Preguntas reales verificadas a mano (record 08): tasa de desocupación 31 aglomerados 2T2026 = 7,9 % y +0,3 p.p. vs 2T2025 (1 tabla); GBA 8,7 % (2T2025) → 8,2 % (2T2026), −0,5 p.p. (2 tablas, 2 PDFs); 1.164 miles = 1,164 millones de desocupados (conversión declarada).
 
 ## File map
@@ -97,12 +98,21 @@ ui/upload.py              render_upload_tab, ingest_files, IngestionProgress (l�
 ui/explore.py             render_explore_tab, group_by_document, Document, delete_document, DeleteOutcome, count_document_vectors
 ui/ask.py                 render_ask_tab, submit_question, validate_question (FR-056), ChatTurn, describe_update, render_answer,
                           results_frame, format_value, MAX_QUESTION_CHARS=1000, HISTORY_KEY="chat_history"
+eval/questions.yaml       set de evaluación (11 preguntas; esquema en el encabezado del archivo)
+eval/run_eval.py          Question, ExpectedValue, ExpectedTable, load_questions, evaluate, check_values, tables_match,
+                          run_questions, summarize, Summary, QuestionOutcome, render_section, update_evaluation_md,
+                          write_results, rerender, main (CLI); marcadores START_MARKER / END_MARKER (D-039)
+eval/results/             latest.json (última corrida completa), run1.json / run2.json (corridas de la Iteración 10),
+                          subset-<fecha>.json (re-corridas con --ids)
+EVALUATION.md             por ahora solo la sección generada entre <!-- EVAL:START --> y <!-- EVAL:END --> (la Iteración 11
+                          agrega metodología, análisis y trazas fuera de los marcadores)
+tests/unit/test_questions_yaml.py  VC-091 (composición del set, causas de BR-014, PDFs existentes)
+tests/unit/test_run_eval.py        runner con `ask` fake: comparación, resumen/NFR, tabla en EVALUATION.md, --render
 tests/unit/test_ui_errors.py  VC-002 (AppTest de app.py sin PINECONE_API_KEY), VC-074, VC-076, VC-073 (AppTest de la pestaña
                           Preguntar con Analista fake), progreso de ingesta, borrado, check_index, RunUrlBuilder
 .claude/launch.json       config `streamlit` para la vista previa (puerto 8501, LLM_CACHE=true, sin estadísticas de uso)
 specs/…-artifacts/screenshots/  capturas de la verificación manual (lista en record 09 y screenshots/README.md)
 
-Layout futuro fijado por el plan: `eval/`.
 
 ## Public interfaces
 
@@ -274,6 +284,20 @@ render_upload_tab(runner|None, table_store, disabled_reason); render_explore_tab
 render_ask_tab(runner|None, table_store, disabled_reason, run_url=None)
 ```
 
+```python
+# eval/run_eval.py  (Iteración 10; D-039)
+class Question: id; question; kind: list[str]; expected_status; expected_answer: list[ExpectedValue] | None; tolerance;
+                expected_tables: list[ExpectedTable(file, pages)]; vc; notes        # validado (cannot_answer sin valores, etc.)
+class ExpectedValue: label; value; unit; abs=False            # abs: compara |valor| (variaciones)
+def load_questions(path=QUESTIONS_PATH) -> list[Question]
+def evaluate(question, result: AnalystResult | None, *, latency_s, trace_url=None, error=None) -> QuestionOutcome
+    # correct = status_ok and value_ok; tables_ok informativo (None si no hubo cálculo)
+def run_questions(questions, ask_fn: (str) -> AnalystResult, url_fn=None, *, on_outcome=None) -> list[QuestionOutcome]
+def summarize(outcomes, *, max_code_retries) -> Summary    # accuracy, latencias, llm_calls_max, nfr006/009/012_ok
+def render_section(outcomes, summary, meta) -> str;  def update_evaluation_md(section, path=EVALUATION_PATH)
+def rerender(results_json, questions_path=..., evaluation_path=None)   # reescribe la sección sin llamar al Analista
+```
+
 Claves de `st.session_state`: `chat_history` (list[ChatTurn]), `ingestion_results` (list[(IngestionResult, líneas)]), `index_check`, `run_url_builder`, `explore_confirm_delete`, `explore_notice`, `explore_vector_counts`.
 
 ## Conventions & invariants
@@ -324,6 +348,14 @@ $env:LLM_CACHE="true"; .venv\Scripts\python -m pytest -m integration tests/integ
 $env:LLM_CACHE="true"; Get-ChildItem data\sample_pdfs\*.pdf | ForEach-Object { .venv\Scripts\python -m agents.ingestion $_.FullName }
 # inspeccionar lo que se extrae de un PDF (sin LLM)
 .venv\Scripts\python scripts/inspect_pdf.py data/sample_pdfs/indec_eph_mercado_trabajo_2t2026.pdf --context
+# evaluación (corrida medida: sin caché para que latencias y llamadas sean reales)
+$env:LLM_CACHE="false"; .venv\Scripts\python -m eval.run_eval --tag runN
+# re-correr algunas preguntas (no toca EVALUATION.md; escribe eval/results/subset-<fecha>.json)
+$env:LLM_CACHE="false"; .venv\Scripts\python -m eval.run_eval --ids q05 q07
+# reescribir la sección de EVALUATION.md desde resultados guardados (sin LLM)
+.venv\Scripts\python -m eval.run_eval --render eval/results/latest.json
+# tests del set y del runner (sin red)
+.venv\Scripts\python -m pytest tests/unit/test_questions_yaml.py tests/unit/test_run_eval.py -v
 # chequeo de secretos (debe dar vacío; repetir con --cached tras el stage) y .env sin trackear
 git grep -nE "(sk-[A-Za-z0-9]{16,}|pcsk[_]|lsv2[_])"
 git grep --cached -nE "(sk-[A-Za-z0-9]{16,}|pcsk[_]|lsv2[_])"
@@ -334,12 +366,14 @@ git ls-files .env
 
 - Límites conocidos del sandbox (D-026): sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store). Cada ejecución real cuesta ~1–8 s según la carga del equipo (arranque + `import pandas`).
 - Analista con datos reales (record 08): (1) la recuperación no siempre trae todas las tablas útiles (p. ej. "personas desocupadas en GBA 2T2026" no recupera `b0a700bac4db8192-p019-t0`, cuyo nombre es "Población de referencia por región"): esas preguntas terminan `cannot_answer` honesto; (2) el selector, tras D-034, a veces marca `covered` partes con un período que no está (p. ej. 2023): la segunda barrera es el código, que las reporta en `missing` con el motivo (resultado correcto, gasta 1 llamada de codegen y 1 ejecución); (3) el selector a veces agrega una tabla extra no usada por el código (aparece en "tablas usadas"). Medir en la Iteración 10.
-- Evaluación (Iteración 10). `AnalystResult.run_url` / `state.run_url` siguen `None` en los agentes: la URL la arma la UI con `RunUrlBuilder(settings)(result.run_id)` (reusable en el eval). FR-056 se valida en la UI (`validate_question`), no en `ask`.
+- `AnalystResult.run_url` / `state.run_url` siguen `None` en los agentes: la URL la arman la UI y el eval con `RunUrlBuilder(settings)(result.run_id)`. FR-056 se valida en la UI (`validate_question`), no en `ask`.
+- **Fallas observadas en la evaluación (record 10):** (1) q05 (cantidad de desocupados de GBA en dos ediciones) no es estable: run 1 `cannot_answer` (no recuperó la tabla de 2T2026 p019), run 2 respuesta **incorrecta** (usó la fila del total de 31 aglomerados, 1.091/1.164, rotulada como GBA: el selector marcó `covered` una tabla sin la entidad y el código no lo frenó), re-corrida correcta (683/656/−27); (2) q07 (2T2024 y 2T2023) pasó de `partial` correcto (run 1) a `cannot_answer` (run 2 y re-corrida): tras D-040 el planificador junta los dos períodos en una sola parte; (3) la granularidad del plan decide `partial` vs `cannot_answer` (q08 run 1: el operando pedido implícitamente se volvió una parte). No se hicieron más rondas de ajuste (el plan permite una).
+- VC-054 no tiene un caso "pesos → USD": los PDFs no traen montos; se usa una conversión que requiere un dato externo (población mundial, q08). Tampoco hay un caso de unidad ambigua: todas las columnas usadas traen su unidad explícita (D-041).
 - UI (record 09): la subida de archivos por arrastrar y soltar no se probó con el mouse (la automatización cargó el archivo en el `<input type=file>`); el link de la traza se verificó por API, abrirlo requiere sesión en LangSmith. `st.dataframe` muestra `NaN` como "None". Cada abrir/cerrar de una tabla en Explorar hace un rerun; Explorar no muestra vectores huérfanos (documentos en Pinecone sin `*.json`). El conteo total de vectores se refresca con el botón (eventual consistency de Pinecone).
 - `.env` tiene `LLM_CACHE=false`; para desarrollo exportar `LLM_CACHE=true` (el proceso gana sobre `.env`). El nombre de archivo va en el prompt de `enrich`: reingerir con otro nombre no usa la caché. `IngestionResult.llm_calls` cuenta invocaciones (incluidas las servidas por la caché).
 - Metadatos reales (revisados a mano, ver record 05): nombres a veces sin período (las dos EPH tienen "Principales tasas del mercado de trabajo"; el período está en la descripción, la sección y las columnas), abreviaturas ("ALC", "2T 2026"); columnas trimestrales de INDEC con mezcla de unidades por fila en el Cuadro 1.3 ("miles de personas o %"); filas de subtítulo de INDEC (`"Sexo y grupos de edad"`) aparecen en `row_headers`; CEPAL tiene notas pegadas a rótulos (`"Argentinab"`) y columnas `Country`/`Age` en inglés; tablas sin encabezado de primera columna quedan `col_0`/`col_4`.
 - Sección errónea en EPH 2T2025 p004 (resumen ejecutivo): "Dentro de la población ocupada (44,5%) se destacó que:" (bloque en negrita, D-014) y una fila sin rótulo.
-- NFR-008 (≤ 15 tablas, ≤ 5 min): medido 16 tablas en ~34 s; formal en la Iteración 10. NFR-001: solo probado en Python 3.13.
+- NFR-008 (≤ 30 páginas y ≤ 15 tablas, ≤ 5 min): tiempos de la ingesta real del record 05 (33,7 / 19,8 / 11,9 s; la EPH 2T2026 tiene 16 tablas), reusados en la Iteración 10 sin reingerir (D-041). NFR-001: solo probado en Python 3.13.
 - `find_tables` no detecta grillas de 1 columna; los cuadros de gráficos generan avisos de tablas descartadas (esperables, la UI los lista).
 - Si se mata un test de integración a mitad, puede quedar un índice `*-itest-*` en Pinecone (borrar a mano).
 - Analista: con preguntas sin relación igual hay candidatas (Pinecone siempre devuelve top-k; scores ~0,3–0,46 vs ~0,7 en preguntas relacionadas): el descarte lo hace el selector (FR-034), no un umbral. Sin tope de candidatas (con 33 tablas, ≤ ~15 por pregunta). La pregunta de VC-040 (2023) termina `cannot_answer` por período: los PDFs cubren 2T2024–2T2026.

@@ -1,0 +1,684 @@
+{
+  "meta": {
+    "date": "2026-10-07 23:00",
+    "model": "gpt-5.4-mini",
+    "llm_cache": "false",
+    "max_code_retries": 3,
+    "retrieval_top_k": 5,
+    "questions": [
+      "q01",
+      "q02",
+      "q03",
+      "q04",
+      "q05",
+      "q06",
+      "q07",
+      "q08",
+      "q09",
+      "q10",
+      "q11"
+    ],
+    "tag": "run2"
+  },
+  "summary": {
+    "n": 11,
+    "n_correct": 9,
+    "accuracy": 0.8181818181818182,
+    "n_status_ok": 10,
+    "latency_median_s": 15.15300859999843,
+    "latency_max_s": 19.889750600006664,
+    "llm_calls_max": 4,
+    "llm_calls_total": 42,
+    "embedding_calls_max": 1,
+    "retries_total": 0,
+    "max_llm_calls_allowed": 7,
+    "nfr006_ok": true,
+    "nfr009_ok": true,
+    "nfr012_ok": true
+  },
+  "outcomes": [
+    {
+      "id": "q01",
+      "question": "¿Cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2026 y cuánto cambió, en puntos porcentuales, respecto del 2° trimestre de 2025?",
+      "kind": [
+        "single_table"
+      ],
+      "vc": [],
+      "expected_status": "answered",
+      "obtained_status": "answered",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "Tasa de desocupación 2T2026",
+          "value": 7.9,
+          "unit": "%",
+          "abs": false
+        },
+        {
+          "label": "Cambio vs 2T2025",
+          "value": 0.3,
+          "unit": "p.p.",
+          "abs": true
+        }
+      ],
+      "tolerance": 0.05,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Tasa de desocupación, total 31 aglomerados urbanos, 2° trimestre de 2026",
+          "value": 7.9,
+          "unit": "%"
+        },
+        {
+          "part_id": "p2",
+          "label": "Cambio en la tasa de desocupación, total 31 aglomerados urbanos, 2° trimestre de 2026 vs 2° trimestre de 2025",
+          "value": 0.3,
+          "unit": "p.p."
+        }
+      ],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": true,
+      "selected_tables": [
+        {
+          "table_id": "b0a700bac4db8192-p008-t0",
+          "file": "indec_eph_mercado_trabajo_2t2026.pdf",
+          "pages": [
+            8
+          ]
+        },
+        {
+          "table_id": "2c14158b26aed2d1-p018-t0",
+          "file": "indec_eph_mercado_trabajo_2t2025.pdf",
+          "pages": [
+            18
+          ]
+        }
+      ],
+      "missing": [],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 19.158405200010748,
+      "run_id": "6b3f1f7b-0778-44cb-871b-c15317defda3",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/6b3f1f7b-0778-44cb-871b-c15317defda3?poll=true",
+      "answer": "La tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2026 fue 7,9 % y el cambio respecto del 2° trimestre de 2025 fue de 0,3 p.p. Se calculó tomando el valor de 2026 de la tabla “Mercado de trabajo total 31 aglomerados urbanos” (indec_eph_mercado_trabajo_2t2026.pdf, pág. 8) y restándole el valor de 2025 de la tabla “Tasa de desocupación por aglomerado urbano, 2º trimestre 2025” (indec_eph_mercado_trabajo_2t2025.pdf, pág. 18). No hubo conversiones aplicadas.",
+      "error": null
+    },
+    {
+      "id": "q02",
+      "question": "¿Cuál fue la tasa de desocupación del Gran Buenos Aires en el 2° trimestre de 2025 y en el 2° trimestre de 2026, y cuántos puntos porcentuales varió entre ambos?",
+      "kind": [
+        "multitable"
+      ],
+      "vc": [],
+      "expected_status": "answered",
+      "obtained_status": "answered",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "GBA 2T2025",
+          "value": 8.7,
+          "unit": "%",
+          "abs": false
+        },
+        {
+          "label": "GBA 2T2026",
+          "value": 8.2,
+          "unit": "%",
+          "abs": false
+        },
+        {
+          "label": "Variación",
+          "value": -0.5,
+          "unit": "p.p.",
+          "abs": true
+        }
+      ],
+      "tolerance": 0.05,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Tasa de desocupación, Gran Buenos Aires, 2° trimestre de 2025 y 2° trimestre de 2026",
+          "value": [
+            8.7,
+            8.2
+          ],
+          "unit": "%"
+        },
+        {
+          "part_id": "p2",
+          "label": "Variación de la tasa de desocupación, Gran Buenos Aires, 2° trimestre de 2025 a 2° trimestre de 2026",
+          "value": -0.5,
+          "unit": "p.p."
+        }
+      ],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": true,
+      "selected_tables": [
+        {
+          "table_id": "2c14158b26aed2d1-p018-t0",
+          "file": "indec_eph_mercado_trabajo_2t2025.pdf",
+          "pages": [
+            18
+          ]
+        },
+        {
+          "table_id": "b0a700bac4db8192-p020-t0",
+          "file": "indec_eph_mercado_trabajo_2t2026.pdf",
+          "pages": [
+            20
+          ]
+        }
+      ],
+      "missing": [],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 16.445200999994995,
+      "run_id": "9f9a86f6-ddb0-4ab3-a7dd-85ab85ecfd0e",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/9f9a86f6-ddb0-4ab3-a7dd-85ab85ecfd0e?poll=true",
+      "answer": "La tasa de desocupación del Gran Buenos Aires fue de 8,7 % en el 2° trimestre de 2025 y de 8,2 % en el 2° trimestre de 2026; la variación entre ambos períodos fue de -0,5 puntos porcentuales. Esto se calculó tomando el valor de “Tasa de desocupación” para “Gran Buenos Aires” en las tablas usadas y restando 2025 a 2026. Tablas usadas: “Tasa de desocupación por aglomerado urbano, 2º trimestre 2025” (indec_eph_mercado_trabajo_2t2025.pdf, pág. 18) y “Tasa de desocupación por región urbana” (indec_eph_mercado_trabajo_2t2026.pdf, pág. 20).",
+      "error": null
+    },
+    {
+      "id": "q03",
+      "question": "¿Cuántas personas desocupadas había en el total de 31 aglomerados urbanos en el 2° trimestre de 2026? Expresalo en millones de personas.",
+      "kind": [
+        "single_table",
+        "scale_conversion"
+      ],
+      "vc": [],
+      "expected_status": "answered",
+      "obtained_status": "answered",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "Desocupados 2T2026",
+          "value": 1.164,
+          "unit": "millones de personas",
+          "abs": false
+        }
+      ],
+      "tolerance": 0.0005,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Población desocupada, total 31 aglomerados urbanos, 2° trimestre de 2026",
+          "value": 1.164,
+          "unit": "millones de personas"
+        }
+      ],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": true,
+      "selected_tables": [
+        {
+          "table_id": "b0a700bac4db8192-p008-t0",
+          "file": "indec_eph_mercado_trabajo_2t2026.pdf",
+          "pages": [
+            8
+          ]
+        }
+      ],
+      "missing": [],
+      "conversions": [
+        "miles de personas → millones de personas"
+      ],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 11.9581601999962,
+      "run_id": "984e24c8-6507-45a2-bb63-b92c3df99765",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/984e24c8-6507-45a2-bb63-b92c3df99765?poll=true",
+      "answer": "La población desocupada en el total de 31 aglomerados urbanos en el 2° trimestre de 2026 fue de 1,164 millones de personas. Se obtuvo a partir de la tabla “Mercado de trabajo total 31 aglomerados urbanos” del archivo indec_eph_mercado_trabajo_2t2026.pdf, pág. 8, tomando el valor de “Población desocupada” y convirtiéndolo de miles de personas a millones de personas.",
+      "error": null
+    },
+    {
+      "id": "q04",
+      "question": "Según la CEPAL, ¿cuál fue la tasa media anual de desocupación abierta de Argentina en 2024? Según el INDEC, ¿cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2025? ¿Cuántos puntos porcentuales de diferencia hay entre ambas?",
+      "kind": [
+        "multitable"
+      ],
+      "vc": [],
+      "expected_status": "answered",
+      "obtained_status": "answered",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "CEPAL Argentina 2024",
+          "value": 7.2,
+          "unit": "%",
+          "abs": false
+        },
+        {
+          "label": "INDEC 31 aglomerados 2T2025",
+          "value": 7.6,
+          "unit": "%",
+          "abs": false
+        },
+        {
+          "label": "Diferencia",
+          "value": 0.4,
+          "unit": "p.p.",
+          "abs": true
+        }
+      ],
+      "tolerance": 0.05,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Tasa media anual de desocupación abierta, Argentina, 2024",
+          "value": 7.2,
+          "unit": "%"
+        },
+        {
+          "part_id": "p2",
+          "label": "Tasa de desocupación, total 31 aglomerados urbanos, 2° trimestre de 2025",
+          "value": 7.6,
+          "unit": "%"
+        },
+        {
+          "part_id": "p3",
+          "label": "Diferencia entre la tasa de desocupación, total 31 aglomerados urbanos, 2° trimestre de 2025, y la tasa media anual de desocupación abierta, Argentina, 2024",
+          "value": 0.4,
+          "unit": "p.p."
+        }
+      ],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": true,
+      "selected_tables": [
+        {
+          "table_id": "105ddaa685cadeb9-p008-t0",
+          "file": "cepal_anuario_estadistico_2025_poblacion_trabajo.pdf",
+          "pages": [
+            8
+          ]
+        },
+        {
+          "table_id": "2c14158b26aed2d1-p008-t0",
+          "file": "indec_eph_mercado_trabajo_2t2025.pdf",
+          "pages": [
+            8
+          ]
+        }
+      ],
+      "missing": [],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 19.889750600006664,
+      "run_id": "fe3e594b-53e3-4aef-aff1-cce7bc88439f",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/fe3e594b-53e3-4aef-aff1-cce7bc88439f?poll=true",
+      "answer": "Según la CEPAL, la tasa media anual de desocupación abierta de Argentina en 2024 fue 7,2 %; según el INDEC, la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2025 fue 7,6 %. La diferencia entre ambas es de 0,4 p.p.  \n\nSe calculó tomando el valor de Argentina 2024 de la tabla “Tasas laborales por país, 2024” (cepal_anuario_estadistico_2025_poblacion_trabajo.pdf, pág. 8) y el del total de 31 aglomerados urbanos del 2° trimestre de 2025 de la tabla “Mercado de trabajo 31 aglomerados urbanos” (indec_eph_mercado_trabajo_2t2025.pdf, pág. 8), y luego restando 7,2 % a 7,6 %. No se aplicaron conversiones.",
+      "error": null
+    },
+    {
+      "id": "q05",
+      "question": "¿Cuántas personas desocupadas había en el Gran Buenos Aires en el 2° trimestre de 2025 y en el 2° trimestre de 2026, y cuál fue la diferencia?",
+      "kind": [
+        "multitable",
+        "retrieval_gap"
+      ],
+      "vc": [],
+      "expected_status": "answered",
+      "obtained_status": "answered",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "Desocupados GBA 2T2025",
+          "value": 683.0,
+          "unit": "miles de personas",
+          "abs": false
+        },
+        {
+          "label": "Desocupados GBA 2T2026",
+          "value": 656.0,
+          "unit": "miles de personas",
+          "abs": false
+        },
+        {
+          "label": "Diferencia",
+          "value": -27.0,
+          "unit": "miles de personas",
+          "abs": true
+        }
+      ],
+      "tolerance": 0.5,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Personas desocupadas, Gran Buenos Aires, 2° trimestre de 2025 y 2° trimestre de 2026",
+          "value": [
+            1091.0,
+            1164.0
+          ],
+          "unit": "miles de personas"
+        },
+        {
+          "part_id": "p2",
+          "label": "Diferencia de personas desocupadas, Gran Buenos Aires, 2° trimestre de 2026 menos 2° trimestre de 2025",
+          "value": 73.0,
+          "unit": "miles de personas"
+        }
+      ],
+      "value_ok": false,
+      "correct": false,
+      "tables_ok": false,
+      "selected_tables": [
+        {
+          "table_id": "b0a700bac4db8192-p008-t0",
+          "file": "indec_eph_mercado_trabajo_2t2026.pdf",
+          "pages": [
+            8
+          ]
+        }
+      ],
+      "missing": [],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 15.15300859999843,
+      "run_id": "c6793253-5fd1-4c9d-88ea-07d9e9e839e5",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/c6793253-5fd1-4c9d-88ea-07d9e9e839e5?poll=true",
+      "answer": "En el Gran Buenos Aires había 1,091 miles de personas desocupadas en el 2° trimestre de 2025 y 1,164 miles de personas desocupadas en el 2° trimestre de 2026; la diferencia fue de 73 miles de personas. Esto se calculó tomando la fila “Población desocupada” de la tabla usada y restando 2025 a 2026.  \nFuente: *Mercado de trabajo total 31 aglomerados urbanos* (indec_eph_mercado_trabajo_2t2026.pdf), pág. 8. No se aplicaron conversiones.",
+      "error": null
+    },
+    {
+      "id": "q06",
+      "question": "¿Qué región tuvo el mayor desempleo en 2023 y cuánto superó al promedio nacional?",
+      "kind": [
+        "missing_period"
+      ],
+      "vc": [
+        "VC-053"
+      ],
+      "expected_status": "cannot_answer",
+      "obtained_status": "cannot_answer",
+      "status_ok": true,
+      "expected_answer": null,
+      "tolerance": 0.0,
+      "obtained": [],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": null,
+      "selected_tables": [
+        {
+          "table_id": "b0a700bac4db8192-p020-t0",
+          "file": "indec_eph_mercado_trabajo_2t2026.pdf",
+          "pages": [
+            20
+          ]
+        }
+      ],
+      "missing": [
+        {
+          "part_id": "p1",
+          "reason": "Faltan los datos de desempleo por región para 2023; la tabla disponible corresponde al 2T2026, no a 2023."
+        },
+        {
+          "part_id": "p2",
+          "reason": "Faltan los datos de desempleo regional y nacional para 2023; la tabla disponible corresponde al 2T2026, no a 2023."
+        }
+      ],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 15.256578700005775,
+      "run_id": "99fe74fc-f8c0-4198-9d48-7754e38db948",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/99fe74fc-f8c0-4198-9d48-7754e38db948?poll=true",
+      "answer": "No se puede responder con las tablas disponibles: faltan los datos de desempleo por región para 2023, y la tabla relacionada corresponde al 2T2026, no a 2023. También faltan los datos de desempleo regional y nacional para 2023; la tabla disponible corresponde al 2T2026, no a 2023.",
+      "error": null
+    },
+    {
+      "id": "q07",
+      "question": "¿Cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2024 y en el 2° trimestre de 2023?",
+      "kind": [
+        "missing_period",
+        "partial"
+      ],
+      "vc": [
+        "VC-053"
+      ],
+      "expected_status": "partial",
+      "obtained_status": "cannot_answer",
+      "status_ok": false,
+      "expected_answer": [
+        {
+          "label": "Tasa de desocupación 2T2024",
+          "value": 7.6,
+          "unit": "%",
+          "abs": false
+        }
+      ],
+      "tolerance": 0.05,
+      "obtained": [],
+      "value_ok": false,
+      "correct": false,
+      "tables_ok": null,
+      "selected_tables": [
+        {
+          "table_id": "2c14158b26aed2d1-p012-t0",
+          "file": "indec_eph_mercado_trabajo_2t2025.pdf",
+          "pages": [
+            12
+          ]
+        }
+      ],
+      "missing": [
+        {
+          "part_id": "p1",
+          "reason": "Falta el valor de la tasa de desocupación para el 2° trimestre de 2023; la tabla disponible solo contiene 2° trimestre de 2024 a 2° trimestre de 2025."
+        }
+      ],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 12.570782700000564,
+      "run_id": "314dcdba-c949-4997-a431-4361ae1b88f0",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/314dcdba-c949-4997-a431-4361ae1b88f0?poll=true",
+      "answer": "No se puede responder con las tablas disponibles porque falta el valor de la tasa de desocupación para el 2° trimestre de 2023; la tabla disponible solo contiene 2° trimestre de 2024 a 2° trimestre de 2025. La tabla relacionada es “Composición de la desocupación por perfil socioeconómico” de indec_eph_mercado_trabajo_2t2025.pdf, pág. 12.",
+      "error": null
+    },
+    {
+      "id": "q08",
+      "question": "¿Qué porcentaje de la población mundial representaba la población total de Argentina en 2025?",
+      "kind": [
+        "external_conversion"
+      ],
+      "vc": [
+        "VC-054"
+      ],
+      "expected_status": "cannot_answer",
+      "obtained_status": "cannot_answer",
+      "status_ok": true,
+      "expected_answer": null,
+      "tolerance": 0.0,
+      "obtained": [],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": null,
+      "selected_tables": [],
+      "missing": [
+        {
+          "part_id": "p1",
+          "reason": "La tabla elegida tiene la población total de Argentina en 2025, pero no contiene la población mundial total de 2025. Sin el denominador mundial no se puede calcular el porcentaje solicitado."
+        }
+      ],
+      "conversions": [],
+      "code_attempts": 0,
+      "retries": 0,
+      "llm_calls": 3,
+      "embedding_calls": 1,
+      "latency_s": 8.259581699996488,
+      "run_id": "063b96b0-b1fc-4c33-85d6-5395ddc6e8f5",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/063b96b0-b1fc-4c33-85d6-5395ddc6e8f5?poll=true",
+      "answer": "No se puede calcular el porcentaje solicitado con las tablas disponibles. La tabla usada sí contiene la población total de Argentina en 2025, pero no incluye la población mundial total de 2025; sin ese denominador no es posible obtener el porcentaje. La tabla relacionada es “Indicadores de población de ALC y el Caribe 2025” del archivo `cepal_anuario_estadistico_2025_poblacion_trabajo.pdf` (págs. 3 y 4), y cubre población total de Argentina y otros países de ALC en 2025, pero no una fila o columna con la población mundial.",
+      "error": null
+    },
+    {
+      "id": "q09",
+      "question": "¿Cuál fue la tasa media anual de desocupación abierta de Colombia en 2024 y cuántos puntos porcentuales superó al promedio de los países del Caribe?",
+      "kind": [
+        "missing_comparison",
+        "partial"
+      ],
+      "vc": [
+        "VC-055"
+      ],
+      "expected_status": "partial",
+      "obtained_status": "partial",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "Desocupación Colombia 2024",
+          "value": 10.2,
+          "unit": "%",
+          "abs": false
+        }
+      ],
+      "tolerance": 0.05,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Tasa media anual de desocupación abierta de Colombia, 2024",
+          "value": 10.2,
+          "unit": "%"
+        }
+      ],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": true,
+      "selected_tables": [
+        {
+          "table_id": "105ddaa685cadeb9-p008-t0",
+          "file": "cepal_anuario_estadistico_2025_poblacion_trabajo.pdf",
+          "pages": [
+            8
+          ]
+        }
+      ],
+      "missing": [
+        {
+          "part_id": "p2",
+          "reason": "Falta el promedio de los países del Caribe como agregado regional explícito; la tabla no provee ese valor directamente."
+        }
+      ],
+      "conversions": [],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 15.907491299993126,
+      "run_id": "27143e71-94b8-4cb3-ae89-0ab8b5f21d3e",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/27143e71-94b8-4cb3-ae89-0ab8b5f21d3e?poll=true",
+      "answer": "La tasa media anual de desocupación abierta de Colombia en 2024 fue de 10,2 %; está tomada de la tabla “Tasas laborales por país, 2024” (cepal_anuario_estadistico_2025_poblacion_trabajo.pdf, pág. 8).\n\nNo puedo dar los puntos porcentuales que superó al promedio de los países del Caribe porque falta el promedio de los países del Caribe como agregado regional explícito; la tabla no provee ese valor directamente.",
+      "error": null
+    },
+    {
+      "id": "q10",
+      "question": "¿Cuántos goles hizo Messi en el Mundial de Qatar 2022?",
+      "kind": [
+        "no_related_table"
+      ],
+      "vc": [],
+      "expected_status": "cannot_answer",
+      "obtained_status": "cannot_answer",
+      "status_ok": true,
+      "expected_answer": null,
+      "tolerance": 0.0,
+      "obtained": [],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": null,
+      "selected_tables": [],
+      "missing": [
+        {
+          "part_id": "p1",
+          "reason": "Ninguna tabla candidata contiene a Messi ni datos del Mundial de Qatar 2022; las tablas son sobre mercado de trabajo o indicadores demográficos/laborales de países y aglomerados urbanos, no sobre fútbol ni goles."
+        }
+      ],
+      "conversions": [],
+      "code_attempts": 0,
+      "retries": 0,
+      "llm_calls": 3,
+      "embedding_calls": 1,
+      "latency_s": 8.010637899991707,
+      "run_id": "1481b6c5-90a4-4c73-a707-143774556ab0",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/1481b6c5-90a4-4c73-a707-143774556ab0?poll=true",
+      "answer": "No se puede responder con las tablas disponibles: ninguna contiene a Messi ni datos del Mundial de Qatar 2022. Las tablas disponibles son sobre mercado de trabajo o indicadores demográficos/laborales de países y aglomerados urbanos, no sobre fútbol ni goles.",
+      "error": null
+    },
+    {
+      "id": "q11",
+      "question": "Según la CEPAL, ¿cuál era la población total de Uruguay en 2025, en millones de personas?",
+      "kind": [
+        "single_table",
+        "scale_conversion",
+        "multipage"
+      ],
+      "vc": [],
+      "expected_status": "answered",
+      "obtained_status": "answered",
+      "status_ok": true,
+      "expected_answer": [
+        {
+          "label": "Población Uruguay 2025",
+          "value": 3.3847,
+          "unit": "millones de personas",
+          "abs": false
+        }
+      ],
+      "tolerance": 0.0005,
+      "obtained": [
+        {
+          "part_id": "p1",
+          "label": "Población total de Uruguay, 2025",
+          "value": 3.3847,
+          "unit": "millones de personas"
+        }
+      ],
+      "value_ok": true,
+      "correct": true,
+      "tables_ok": true,
+      "selected_tables": [
+        {
+          "table_id": "105ddaa685cadeb9-p003-t0",
+          "file": "cepal_anuario_estadistico_2025_poblacion_trabajo.pdf",
+          "pages": [
+            3,
+            4
+          ]
+        }
+      ],
+      "missing": [],
+      "conversions": [
+        "miles de personas → millones de personas"
+      ],
+      "code_attempts": 1,
+      "retries": 0,
+      "llm_calls": 4,
+      "embedding_calls": 1,
+      "latency_s": 11.981605500011938,
+      "run_id": "72c7ba6c-abb5-408b-82c5-445adf45edc1",
+      "trace_url": "https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/72c7ba6c-abb5-408b-82c5-445adf45edc1?poll=true",
+      "answer": "Según la CEPAL, la población total de Uruguay en 2025 era de 3,3847 millones de personas. Esto se obtuvo tomando el valor de Uruguay en 2025 de la tabla “Indicadores de población de ALC y el Caribe 2025” (cepal_anuario_estadistico_2025_poblacion_trabajo.pdf, págs. 3 y 4) y convirtiéndolo de miles de personas a millones de personas.",
+      "error": null
+    }
+  ]
+}
