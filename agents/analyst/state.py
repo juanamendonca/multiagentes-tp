@@ -5,9 +5,10 @@
 ``run_url``) más contadores y avisos. ``warnings``, ``llm_calls`` y ``embedding_calls`` se
 acumulan (reducer ``operator.add``).
 
-Contrato con los nodos de código (``generate_code``/``execute``, Iteración 8):
+Contrato de los nodos de código (``generate_code``/``execute``, FR-035..FR-038):
 
 - ``code``: último programa generado (sin el preámbulo); ``None`` si no se generó.
+  Los alias del programa son ``t{i}`` = ``selection.selected_table_ids[i-1]``.
 - ``code_attempts``: llamadas a ``generate_code`` hechas (0 si no hubo código).
 - ``execution``: ``ExecutionResult`` de la última ejecución en el sandbox; ``None`` si no hubo.
 - ``missing`` **antes** de ``decide_status``: faltantes que agrega el lado del código (p. ej.
@@ -38,7 +39,7 @@ class AnalystState(TypedDict, total=False):
     candidates: list[Candidate]
     # select_tables (FR-033, FR-034)
     selection: TableSelection | None
-    # generate_code / execute (FR-035..FR-038; stubs en la Iteración 7)
+    # generate_code / execute (FR-035..FR-038)
     code: str | None
     code_attempts: int
     execution: ExecutionResult | None

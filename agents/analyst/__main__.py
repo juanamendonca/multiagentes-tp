@@ -1,8 +1,9 @@
 """CLI del Analista: ``python -m agents.analyst "<pregunta>"``.
 
 Responde con el grafo real (LiteLLM + Pinecone ``PINECONE_INDEX_NAME`` en solo lectura +
-``TABLES_DIR``) y muestra estado, respuesta, plan, candidatas, cobertura por parte, resultados,
-faltantes y avisos. Código de salida: 0 si respondió (cualquier estado), 2 si falta config.
+``TABLES_DIR``) y muestra estado, respuesta, plan, candidatas, cobertura por parte, código
+generado, ejecución, conversiones, resultados, faltantes y avisos. Código de salida: 0 si
+respondió (cualquier estado), 2 si falta config.
 """
 
 from __future__ import annotations
@@ -44,6 +45,17 @@ def print_result(result: AnalystResult, *, max_candidates: int = 10) -> None:
             print(line)
         if result.selection.rationale:
             print(f"  motivo: {result.selection.rationale}")
+    if result.code is not None:
+        print(f"código (intento {result.code_attempts}):\n{result.code}\n")
+    if result.execution is not None:
+        execution = result.execution
+        print(
+            f"ejecución: status={execution.status} returncode={execution.returncode} "
+            f"duración={execution.duration_s:.2f}s"
+        )
+        if execution.error:
+            print(f"  error: {execution.error}")
+    print(f"conversiones: {result.conversions}")
     print(f"resultados: {[r.model_dump() for r in result.results]}")
     for m in result.missing:
         note = f" (relacionada: {m.related_table_note})" if m.related_table_note else ""

@@ -1,6 +1,9 @@
-"""Grafo Analista con fakes (sin red): VC-041, VC-042, VC-044, VC-052, VC-056, más
-normalización del plan y de la selección, stubs de código, presupuesto de llamadas (NFR-006)
-y traza ``analyst:<pregunta>`` (mecanismo de FR-061)."""
+"""Grafo Analista con fakes (sin red): VC-041, VC-042, VC-044, VC-045, VC-047, VC-048 (en el
+grafo), VC-049, VC-052, VC-056, más normalización del plan y de la selección, extracción del
+código, presupuesto de llamadas (NFR-006) y traza ``analyst:<pregunta>`` (mecanismo de FR-061).
+
+El sandbox es un fake (``FakeSandbox``: salidas guionadas validadas con ``check_code`` y
+``parse_result_line``) salvo en VC-045 y VC-047, que lanzan el sandbox real (3 subprocesos)."""
 
 from __future__ import annotations
 
@@ -8,6 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pydantic
 import pytest
@@ -20,26 +24,34 @@ from agents.analyst.graph import (
     trace_run_name,
 )
 from agents.analyst.nodes import (
-    CODEGEN_STUB_REASON,
     COVERED_WITHOUT_TABLE_REASON,
     NO_CANDIDATES_REASON,
     NOT_EVALUATED_REASON,
     AnalystDeps,
     decide_status_node,
+    extract_code,
     merge_matches,
     normalize_selection,
 )
 from agents.analyst.schemas import (
     AnalystResult,
     Candidate,
-    MissingPart,
     PartCoverage,
     QueryPart,
     QueryPlan,
     TableSelection,
 )
 from agents.ingestion.schemas import TableRecord
-from services.sandbox import ExecutionResult, ParsedOutput, ResultItem
+from services.sandbox import (
+    ExecutionResult,
+    OutputContractError,
+    ParsedOutput,
+    ResultItem,
+    check_code,
+    parse_result_line,
+    run_in_sandbox,
+    summarize_stderr,
+)
 from services.table_store import TableStore
 from services.vectorstore import Match, VectorRecord, build_embedding_text, build_metadata
 from tests.fakes import FakeEmbeddings, FakeVectorStore, ScriptedChatModel
@@ -81,8 +93,86 @@ class ScriptedVectorStore(FakeVectorStore):
         return self.scripted[len(self.query_calls) - 1]
 
 
+SandboxOutput = tuple[int, str, str] | str
+
+
+class FakeSandbox:
+    """``run_in_sandbox`` fake: cada llamada toma la siguiente salida guionada (``str`` = stdout
+    con returncode 0, o ``(returncode, stdout, stderr)``) y arma el ``ExecutionResult`` con las
+    mismas reglas que el real: ``check_code`` (``rejected``), returncode ≠ 0 (``error`` con la
+    última línea de stderr) y ``parse_result_line`` (``invalid_output``). Registra las llamadas."""
+
+    def __init__(self, outputs: Sequence[SandboxOutput] = ()) -> None:
+        self.outputs: list[SandboxOutput] = list(outputs)
+        self.calls: list[dict[str, Any]] = []
+        self.executions = 0  # llamadas que pasaron el chequeo AST (las que consumen una salida)
+
+    def __call__(
+        self,
+        code: str,
+        tables: Any,
+        timeout_s: int,
+        static_check: bool = True,
+        *,
+        covered_part_ids: Sequence[str] | None = None,
+    ) -> ExecutionResult:
+        self.calls.append(
+            {"code": code, "tables": dict(tables), "timeout_s": timeout_s, "covered": covered_part_ids}
+        )
+        reasons = check_code(code) if static_check else []
+        if reasons:
+            return ExecutionResult(
+                status="rejected",
+                error="código rechazado por el chequeo de seguridad: " + "; ".join(reasons),
+                rejected_reasons=reasons,
+            )
+        index = self.executions
+        self.executions += 1
+        if index >= len(self.outputs):
+            raise AssertionError(f"FakeSandbox: ejecución #{index + 1} sin salida guionada")
+        output = self.outputs[index]
+        returncode, stdout, stderr = (0, output, "") if isinstance(output, str) else output
+        base = {"stdout": stdout, "stderr": stderr, "returncode": returncode, "duration_s": 0.01}
+        if returncode != 0:
+            return ExecutionResult(
+                status="error", error=f"returncode {returncode}: {summarize_stderr(stderr)}", **base
+            )
+        if covered_part_ids is None:
+            return ExecutionResult(status="ok", **base)
+        try:
+            parsed = parse_result_line(stdout, covered_part_ids)
+        except OutputContractError as exc:
+            return ExecutionResult(status="invalid_output", error=f"salida inválida: {exc}", **base)
+        return ExecutionResult(status="ok", parsed=parsed, **base)
+
+
+def ok_stdout(
+    *results: tuple[str, float], missing: Sequence[tuple[str, str]] = (), conversions: Sequence[str] = ()
+) -> str:
+    """Stdout válido de §7.6 con los resultados ``(part_id, valor)`` y faltantes dados."""
+    import json
+
+    payload = {
+        "results": [{"part_id": pid, "label": f"valor {pid}", "value": v, "unit": "%"} for pid, v in results],
+        "missing": [{"part_id": pid, "reason": reason} for pid, reason in missing],
+        "conversions": list(conversions),
+    }
+    return "calculando…\n" + json.dumps(payload, ensure_ascii=False)
+
+
+def code_reply(code: str, prose: str = "Acá está el programa:") -> str:
+    """Respuesta del LLM de codegen: texto + bloque ```python```."""
+    return f"{prose}\n```python\n{code}\n```\n"
+
+
+GOOD_CODE = 'import json\nprint(json.dumps({"results": [], "missing": [], "conversions": []}))'
+BROKEN_CODE = 'x = tables["t1"]["no existe"]'
+KEY_ERROR_STDERR = "Traceback (most recent call last):\n  File \"main.py\", line 30\nKeyError: 'no existe'\n"
+
+
 class Harness:
-    """Deps de test (LLM guionado, embeddings fake, Pinecone fake, TableStore temporal)."""
+    """Deps de test (LLM guionado, embeddings fake, Pinecone fake, TableStore temporal y sandbox
+    fake; ``sandbox=run_in_sandbox`` usa el real)."""
 
     def __init__(
         self,
@@ -91,6 +181,7 @@ class Harness:
         store: FakeVectorStore | None = None,
         *,
         no_index: bool = False,
+        sandbox: Any = None,
         **settings: Any,
     ) -> None:
         self.settings = fake_settings(tmp_path / "tables", **settings)
@@ -100,6 +191,7 @@ class Harness:
         self.table_store = TableStore(self.settings.tables_dir)
         self.factory_calls = 0
         self.events: list[tuple[str, dict[str, Any]]] = []
+        self.sandbox = sandbox if sandbox is not None else FakeSandbox()
 
         def factory() -> FakeVectorStore | None:
             self.factory_calls += 1
@@ -111,6 +203,7 @@ class Harness:
             embeddings=self.embeddings,
             vector_store_factory=factory,
             table_store=self.table_store,
+            sandbox=self.sandbox,
         )
 
     def index(self, record: TableRecord, df: pd.DataFrame, *, with_parquet: bool = True) -> TableRecord:
@@ -383,31 +476,6 @@ def test_vc044_all_parts_missing_never_generates_code(tmp_path: Path) -> None:
     assert "cubre 2024–2026" in respond_prompt and a.name in respond_prompt
 
 
-def test_covered_parts_go_through_code_stubs_and_end_as_missing(tmp_path: Path) -> None:
-    """Given una parte covered, then pasa por generate_code y execute (stubs de la Iteración 7),
-    que no llaman al LLM, y la parte termina missing con "codegen no implementado"."""
-    h = Harness(tmp_path, [])
-    a, b = two_tables(h)
-    selection = TableSelection(
-        selected_table_ids=[a.table_id],
-        coverage=[
-            coverage("p1", "covered", [a.table_id]),
-            coverage("p2", "missing", missing_reason="no hay"),
-        ],
-    )
-    h.chat.responses = [plan(2), selection, "No se pudo calcular."]
-
-    result = h.run()
-
-    assert h.nodes == list(NODE_NAMES)
-    assert result.status == "cannot_answer"
-    assert result.results == []
-    assert result.missing[0] == MissingPart(part_id="p1", reason=CODEGEN_STUB_REASON, table_ids=[a.table_id])
-    assert result.execution is None and result.code is None and result.code_attempts == 0
-    assert [t.table_id for t in result.selected_tables] == [a.table_id]
-    assert len(h.chat.calls) == 3  # understand + select + respond (los stubs no llaman al LLM)
-
-
 def test_normalize_selection_fixes_ids_coverage_and_selected_tables() -> None:
     """Given una salida del LLM con un id inventado, una parte sin evaluar, una covered sin
     tabla válida y una parte desconocida, then se corrige como describe D-030."""
@@ -564,7 +632,7 @@ def test_nfr006_call_budget_with_many_parts_and_queries(tmp_path: Path) -> None:
 
 def test_graph_mermaid_has_all_nodes_and_conditional_edges(tmp_path: Path) -> None:
     """Given el grafo compilado, then draw_mermaid tiene los 7 nodos y las aristas condicionales
-    de retrieve y select_tables."""
+    de retrieve, select_tables y execute (reintento, FR-037)."""
     mermaid = build_analyst_graph(Harness(tmp_path, []).deps).get_graph().draw_mermaid()
 
     for name in NODE_NAMES:
@@ -575,7 +643,8 @@ def test_graph_mermaid_has_all_nodes_and_conditional_edges(tmp_path: Path) -> No
         "select_tables -.-> decide_status",
         "select_tables -.-> generate_code",
         "generate_code --> execute",
-        "execute --> decide_status",
+        "execute -.-> generate_code",
+        "execute -.-> decide_status",
         "decide_status --> respond",
     ):
         assert edge in mermaid
@@ -596,8 +665,11 @@ def test_analyst_trace_has_name_run_id_and_final_metadata(
     h.chat.responses = [
         plan(1),
         TableSelection(selected_table_ids=[a.table_id], coverage=[coverage("p1", "covered", [a.table_id])]),
+        code_reply(BROKEN_CODE),
+        code_reply(GOOD_CODE),
         "respuesta",
     ]
+    h.sandbox.outputs = [(1, "", KEY_ERROR_STDERR), ok_stdout(("p1", 8.1))]
     long_question = "¿" + "x" * 100 + "?"
 
     result = h.run(long_question)
@@ -608,10 +680,12 @@ def test_analyst_trace_has_name_run_id_and_final_metadata(
     assert len(roots) == 1 and str(roots[0]["id"]) == result.run_id
     created = {c.get("name") for c in client.created}
     assert set(NODE_NAMES) <= created
+    node_runs = [c.get("name") for c in client.created if c.get("parent_run_id") == roots[0]["id"]]
+    assert node_runs.count("generate_code") == node_runs.count("execute") == 2  # repeticiones (VC-081)
     metadata = metadata_of(client.updated, name)
-    assert metadata["status"] == "cannot_answer"
+    assert metadata["status"] == "answered"
     assert metadata["selected_table_ids"] == [a.table_id]
-    assert metadata["code_attempts"] == 0
+    assert metadata["code_attempts"] == 2
 
 
 def test_trace_metadata_without_selection() -> None:
@@ -623,3 +697,242 @@ def test_trace_metadata_without_selection() -> None:
         "llm_calls": 0,
         "embedding_calls": 0,
     }
+
+
+# --- generate_code / execute: VC-045, VC-047, VC-048, VC-049, NFR-006 ----------------------------
+
+RATE = "Tasa de desocupación - 2T2026"
+
+
+def gba_code(*aliases_by_part: tuple[str, str]) -> str:
+    """Programa que lee el valor de GBA de cada alias y lo reporta para cada parte."""
+    lines = ["import json", "results = []"]
+    for part_id, alias in aliases_by_part:
+        lines += [
+            f'df = tables["{alias}"]',
+            f'v = float(df.loc[df["Región"].str.strip() == "GBA", "{RATE}"].iloc[0])',
+            f'results.append({{"part_id": "{part_id}", "label": "GBA {alias}", "value": v, "unit": "%"}})',
+        ]
+    lines.append(
+        'print(json.dumps({"results": results, "missing": [], "conversions": []}, ensure_ascii=False))'
+    )
+    return "\n".join(lines)
+
+
+def select_covered(
+    *parts: tuple[str, Sequence[str]], selected: Sequence[str] | None = None
+) -> TableSelection:
+    ids = list(selected) if selected is not None else [t for _, tables in parts for t in tables]
+    return TableSelection(
+        selected_table_ids=ids, coverage=[coverage(pid, "covered", tables) for pid, tables in parts]
+    )
+
+
+def test_extract_code_takes_the_python_block() -> None:
+    """Given respuestas del LLM con y sin bloques de código, then se extrae el programa."""
+    assert extract_code("Texto\n```python\nx = 1\n```\nmás texto") == "x = 1"
+    assert extract_code("```\ny = 2\n```") == "y = 2"
+    assert extract_code("```sql\nselect 1\n```\n```py\nz = 3\n```") == "z = 3"
+    assert extract_code("w = 4\n") == "w = 4"
+    assert extract_code("```python\nsin_cerrar = 5\n") == "sin_cerrar = 5"
+    assert extract_code("```python\n```") == ""
+
+
+def test_vc045_codegen_prompt_has_exact_columns_and_program_reads_tables_by_alias(tmp_path: Path) -> None:
+    """Given 2 tablas elegidas (orden b, a), when se genera y ejecuta el código en el sandbox
+    REAL, then el prompt trae, por alias t1/t2 y en ese orden, los nombres exactos de columnas con
+    su dtype, la primera columna fila por fila y df.head(5); el programa lee tables["t1"] y
+    tables["t2"] (alias = orden de selected_table_ids) sin abrir archivos y la pregunta queda
+    answered con los valores de cada tabla."""
+    h = Harness(tmp_path, [], sandbox=run_in_sandbox)
+    df_a = sample_df()
+    df_b = sample_df()
+    df_b[RATE] = pd.Series([9.9, 1.0, np.nan, 2.0], dtype="float64")
+    a = h.index(sample_record(DOC_HASH, 3, 0, df_a, name="Desocupación por región 2026"), df_a)
+    b = h.index(sample_record(OTHER_DOC_HASH, 5, 0, df_b, name="Desocupación por región 2025"), df_b)
+    code = gba_code(("p1", "t1"), ("p2", "t2"))
+    h.chat.responses = [
+        plan(2),
+        select_covered(("p1", [b.table_id]), ("p2", [a.table_id]), selected=[b.table_id, a.table_id]),
+        code_reply(code),
+        "respuesta",
+    ]
+
+    result = h.run()
+
+    prompt = h.chat.calls[2]
+    t1 = prompt.index(f'### t1 = tables["t1"]: {b.name}')
+    t2 = prompt.index(f'### t2 = tables["t2"]: {a.name}')
+    assert t1 < t2
+    for block in (prompt[t1:t2], prompt[t2:]):
+        assert '"Región" (dtype str; tipo text)' in block
+        assert f'"{RATE}" (dtype float64; tipo text)' in block
+        assert '"Año" (dtype Int64; tipo text)' in block
+        assert "  2: <NaN>" in block and "  3: Patagonia" in block
+        assert f"Región,{RATE},Año" in block  # df.head(5)
+    assert "- p1: parte 1" in prompt and "- p2: parte 2" in prompt
+    assert 'tables["t1"]' in prompt and "p1, p2" in prompt  # reglas y partes a calcular
+    assert result.code == code and "open(" not in code
+    assert result.execution is not None and result.execution.ok and result.execution.returncode == 0
+    assert {r.part_id: r.value for r in result.results} == {"p1": 9.9, "p2": 8.1}
+    assert result.status == "answered" and result.code_attempts == 1
+    assert [t.table_id for t in result.selected_tables] == [b.table_id, a.table_id]
+
+
+def test_vc047_key_error_then_fixed_code_retries_with_error_feedback(tmp_path: Path) -> None:
+    """Given un LLM que devuelve código con KeyError y después código correcto (sandbox REAL),
+    then 2 pasadas por generate_code, el segundo prompt contiene el código anterior y KeyError,
+    code_attempts=2 y status=answered."""
+    h = Harness(tmp_path, [], sandbox=run_in_sandbox)
+    a, _ = two_tables(h)
+    h.chat.responses = [
+        plan(1),
+        select_covered(("p1", [a.table_id])),
+        code_reply(BROKEN_CODE),
+        code_reply(gba_code(("p1", "t1"))),
+        "respuesta",
+    ]
+
+    result = h.run()
+
+    assert h.nodes.count("generate_code") == 2 and h.nodes.count("execute") == 2
+    retry_prompt = h.chat.calls[3]
+    assert "KeyError" in retry_prompt and BROKEN_CODE in retry_prompt
+    assert "El intento 1 de 4 falló" in retry_prompt
+    assert result.code_attempts == 2
+    assert result.status == "answered"
+    assert [(r.part_id, r.value) for r in result.results] == [("p1", 8.1)]
+    assert result.missing == []
+
+
+@pytest.mark.parametrize(
+    "bad_stdout",
+    [
+        "hola, no hay JSON\n",
+        '{"results": [{"part_id": "p1", "value": 1.0}], "missing": [], "conversions": []}',
+        '{"results": [{"part_id": "p1", "value": NaN}, {"part_id": "p2", "value": 1.0}], "missing": []}',
+    ],
+    ids=["sin-json-final", "falta-parte-covered", "value-nan"],
+)
+def test_vc048_invalid_output_in_the_graph_triggers_a_retry(tmp_path: Path, bad_stdout: str) -> None:
+    """Given una salida sin JSON final, sin una parte covered o con value=NaN, then cuenta como
+    inválida (§7.6), se reintenta con el error como feedback y el segundo intento responde."""
+    h = Harness(tmp_path, [])
+    a, _ = two_tables(h)
+    h.chat.responses = [
+        plan(2),
+        select_covered(("p1", [a.table_id]), ("p2", [a.table_id])),
+        code_reply(GOOD_CODE),
+        code_reply(GOOD_CODE + "\n# corregido"),
+        "respuesta",
+    ]
+    h.sandbox.outputs = [bad_stdout, ok_stdout(("p1", 1.0), ("p2", 2.0))]
+
+    result = h.run()
+
+    assert h.nodes.count("generate_code") == 2
+    assert "salida inválida" in h.chat.calls[3]
+    assert "Final de stdout" in h.chat.calls[3]
+    assert result.code_attempts == 2 and result.status == "answered"
+    assert h.sandbox.calls[0]["covered"] == ["p1", "p2"]
+
+
+@pytest.mark.parametrize(
+    ("first_reply", "expected"),
+    [
+        (code_reply("import os\nprint(os.getcwd())"), "rechazado por el chequeo de seguridad"),
+        (code_reply(""), "no contenía código"),
+        ("Lo siento, no puedo escribir ese programa.", "error de sintaxis"),
+    ],
+    ids=["ast", "sin-codigo", "texto"],
+)
+def test_rejected_or_missing_code_is_retried_without_running(
+    tmp_path: Path, first_reply: str, expected: str
+) -> None:
+    """Given un primer programa rechazado por el AST, vacío o que no es código, then no se
+    ejecuta, el reintento recibe el motivo y el segundo programa responde."""
+    h = Harness(tmp_path, [])
+    a, _ = two_tables(h)
+    h.chat.responses = [
+        plan(1),
+        select_covered(("p1", [a.table_id])),
+        first_reply,
+        code_reply(GOOD_CODE),
+        "r",
+    ]
+    h.sandbox.outputs = [ok_stdout(("p1", 3.0))]
+
+    result = h.run()
+
+    assert expected in h.chat.calls[3]
+    assert h.sandbox.executions == 1  # solo se ejecutó el segundo programa
+    assert result.status == "answered" and result.code_attempts == 2
+
+
+@pytest.mark.parametrize("max_code_retries", [0, 1, 3])
+def test_vc049_nfr006_always_broken_code_exhausts_retries(tmp_path: Path, max_code_retries: int) -> None:
+    """Given un LLM que siempre devuelve código roto y MAX_CODE_RETRIES=R, then exactamente 1 + R
+    pasadas por generate_code/execute, la parte covered pasa a missing con "falló la ejecución
+    tras 1 + R intentos: …", status según BR-015 (cannot_answer: ninguna parte respondida) y el
+    presupuesto de NFR-006: 4 + R llamadas de chat y 1 de embeddings."""
+    attempts = 1 + max_code_retries
+    h = Harness(tmp_path, [], max_code_retries=max_code_retries)
+    a, _ = two_tables(h)
+    h.chat.responses = [
+        plan(2),
+        TableSelection(
+            selected_table_ids=[a.table_id],
+            coverage=[
+                coverage("p1", "covered", [a.table_id]),
+                coverage("p2", "missing", missing_reason="no"),
+            ],
+        ),
+        *[code_reply(BROKEN_CODE)] * attempts,
+        "No se pudo calcular.",
+    ]
+    h.sandbox.outputs = [(1, "", KEY_ERROR_STDERR)] * attempts
+
+    result = h.run()
+
+    assert h.nodes.count("generate_code") == attempts == h.nodes.count("execute")
+    assert result.code_attempts == attempts
+    assert result.status == "cannot_answer" and result.results == []
+    p1 = result.missing[0]
+    assert p1.part_id == "p1" and p1.table_ids == [a.table_id]
+    assert p1.reason.startswith(f"falló la ejecución tras {attempts} intentos: returncode 1: KeyError")
+    assert [m.part_id for m in result.missing] == ["p1", "p2"]
+    assert len(h.chat.calls) == result.llm_calls == 4 + max_code_retries
+    assert result.embedding_calls == 1 == len(h.embeddings.calls)
+    assert "Código que calculó" not in h.chat.calls[-1]
+
+
+def test_code_reported_missing_makes_partial_and_respond_gets_tables_conversions_and_code(
+    tmp_path: Path,
+) -> None:
+    """Given 2 partes covered y un programa que calcula p1 (con conversión) y reporta p2 en
+    missing, then partial, results solo con p1, faltante de p2 con el motivo del código, y el
+    prompt de respond trae la conversión, la tabla con archivo y páginas y el código (FR-040)."""
+    h = Harness(tmp_path, [])
+    a, _ = two_tables(h)
+    h.chat.responses = [
+        plan(2),
+        select_covered(("p1", [a.table_id]), ("p2", [a.table_id])),
+        code_reply(GOOD_CODE),
+        "respuesta parcial",
+    ]
+    h.sandbox.outputs = [
+        ok_stdout(("p1", 1.164), missing=[("p2", "falta 2027")], conversions=["miles → millones"])
+    ]
+
+    result = h.run()
+
+    assert result.status == "partial"
+    assert [r.part_id for r in result.results] == ["p1"]
+    assert [(m.part_id, m.reason) for m in result.missing] == [("p2", "falta 2027")]
+    assert result.conversions == ["miles → millones"]
+    prompt = h.chat.calls[-1]
+    assert "miles → millones" in prompt
+    assert f"{a.name} (informe.pdf, págs. 3, 4; id {a.table_id})" in prompt
+    assert "Código que calculó los resultados" in prompt and GOOD_CODE in prompt
+    assert h.sandbox.calls[0]["tables"] == {"t1": h.table_store.parquet_path(a.table_id)}
+    assert h.sandbox.calls[0]["timeout_s"] == h.settings.sandbox_timeout_s

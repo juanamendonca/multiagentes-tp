@@ -4,17 +4,20 @@ Cada nodo recibe el estado (y ``AnalystDeps``) y devuelve **solo** las claves qu
 esas actualizaciones son los eventos de ``graph.stream(stream_mode="updates")``.
 
 Orden: ``understand_query`` → ``retrieve`` → ``select_tables`` → ``generate_code`` →
-``execute`` → ``decide_status`` → ``respond``. ``generate_code`` y ``execute`` son **stubs** en la
-Iteración 7: no llaman al LLM ni al sandbox y dejan las partes ``covered`` como ``missing`` con
-el motivo ``CODEGEN_STUB_REASON``; la Iteración 8 reemplaza sus cuerpos (y agrega la arista de
-reintento) sin cambiar el contrato del estado (ver ``agents/analyst/state.py``).
+``execute`` (⇄ ``generate_code`` mientras falle y queden intentos, FR-037) → ``decide_status`` →
+``respond``. ``generate_code`` pide al LLM un programa pandas sobre los alias ``t1..tn``
+(FR-035) y ``execute`` lo corre en el sandbox (FR-036, BR-012/BR-013); al agotar los
+``1 + MAX_CODE_RETRIES`` intentos las partes ``covered`` pasan a ``missing`` (FR-038). Contrato
+del estado en ``agents/analyst/state.py``.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import openai
@@ -22,9 +25,11 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 
 from agents.analyst.prompts import (
+    build_codegen_messages,
     build_respond_messages,
     build_select_messages,
     build_understand_messages,
+    describe_feedback,
     fallback_answer,
 )
 from agents.analyst.schemas import (
@@ -38,14 +43,15 @@ from agents.analyst.schemas import (
 from agents.analyst.state import AnalystState
 from agents.analyst.status import answered_part_ids, decide_status
 from services.config import Settings
-from services.sandbox import ExecutionResult
+from services.sandbox import ExecutionResult, run_in_sandbox
 from services.table_store import TableStore
 from services.vectorstore import Match, VectorStore, decode_metadata, open_index
 
 logger = logging.getLogger(__name__)
 
 NO_CANDIDATES_REASON = "no hay tablas indexadas relacionadas"
-CODEGEN_STUB_REASON = "codegen no implementado"
+EXHAUSTED_REASON = "falló la ejecución tras {attempts} intentos: {error}"
+NO_CODE_ERROR = "la respuesta del modelo no contenía código Python"
 DEFAULT_MISSING_REASON = "ninguna tabla disponible contiene este dato"
 NOT_EVALUATED_REASON = "el selector de tablas no evaluó esta parte"
 COVERED_WITHOUT_TABLE_REASON = "el selector la marcó como cubierta sin indicar una tabla candidata válida"
@@ -63,6 +69,9 @@ RECOVERABLE_LLM_ERRORS: tuple[type[BaseException], ...] = (
 
 _UNSET: Any = object()
 
+SandboxRunner = Callable[..., ExecutionResult]
+"""Firma de ``run_in_sandbox(code, tables, timeout_s, *, covered_part_ids=...)``."""
+
 
 @dataclass
 class AnalystDeps:
@@ -73,7 +82,9 @@ class AnalystDeps:
     - ``vector_store_factory``: devuelve el ``VectorStore`` o ``None`` si el índice no existe; se
       llama una sola vez y recién en ``retrieve``. Por defecto ``open_index`` (solo lectura: el
       Analista nunca crea ni escribe el índice).
-    - ``table_store``: almacén Parquet + JSON (FR-042: candidatas sin Parquet se descartan).
+    - ``table_store``: almacén Parquet + JSON (FR-042: candidatas sin Parquet se descartan; el
+      codegen lee ``df.head(5)``/dtypes y el sandbox recibe ``parquet_path``).
+    - ``sandbox``: ``run_in_sandbox`` (BR-012); los tests lo reemplazan por un fake.
     """
 
     settings: Settings
@@ -81,11 +92,12 @@ class AnalystDeps:
     embeddings: Embeddings
     vector_store_factory: Callable[[], VectorStore | None]
     table_store: TableStore
+    sandbox: SandboxRunner = run_in_sandbox
     _vector_store: Any = field(default=_UNSET, init=False, repr=False)
 
     @property
     def max_code_attempts(self) -> int:
-        """Intentos de generación de código: ``1 + MAX_CODE_RETRIES`` (BR-011; Iteración 8)."""
+        """Intentos de generación de código: ``1 + MAX_CODE_RETRIES`` (BR-011)."""
         return 1 + self.settings.max_code_retries
 
     def vector_store(self) -> VectorStore | None:
@@ -366,31 +378,96 @@ def route_after_select(state: AnalystState) -> str:
     return "generate_code" if selection is not None and selection.covered_part_ids else "decide_status"
 
 
-# --- generate_code / execute (stubs de la Iteración 7) -------------------------------------------
+# --- generate_code / execute (FR-035..FR-038) ---------------------------------------------------
+
+_FENCE_RE = re.compile(r"```[ \t]*([A-Za-z0-9_+-]*)[^\n]*\n(.*?)```", re.DOTALL)
+
+
+def extract_code(text: str) -> str:
+    """Programa de la respuesta del LLM: el primer bloque ```` ```python ```` (o ```` ```py ````);
+    si no hay, el primer bloque sin lenguaje; si no hay bloques, el texto entero (si no es
+    código, el chequeo AST lo rechaza con "error de sintaxis" y se reintenta)."""
+    blocks = [(lang.lower(), body) for lang, body in _FENCE_RE.findall(text or "")]
+    for lang, body in blocks:
+        if lang in ("python", "py", "python3"):
+            return body.strip()
+    for lang, body in blocks:
+        if not lang:
+            return body.strip()
+    stripped = (text or "").strip()
+    if stripped.startswith("```"):  # bloque sin cerrar
+        stripped = stripped.split("\n", 1)[1] if "\n" in stripped else ""
+    return stripped.strip()
+
+
+def table_aliases(selection: TableSelection) -> dict[str, str]:
+    """Alias del sandbox: ``t{i}`` = ``selected_table_ids[i-1]`` (mismo orden en prompt y sandbox)."""
+    return {f"t{i}": table_id for i, table_id in enumerate(selection.selected_table_ids, start=1)}
 
 
 def generate_code_node(state: AnalystState, deps: AnalystDeps) -> dict[str, Any]:
-    """STUB (Iteración 8: FR-035). No llama al LLM: no hay código y ``code_attempts`` no cambia.
-
-    La versión real devuelve ``{"code": <programa>, "code_attempts": n + 1, "llm_calls": 1}``.
-    """
-    return {"code": None, "code_attempts": int(state.get("code_attempts") or 0)}
+    """FR-035 / FR-037: el LLM recibe, por alias ``t1..tn``, nombres exactos de columnas, dtypes,
+    unidades, la primera columna fila por fila y ``df.head(5)``, más las partes ``covered``; en un
+    reintento, además el código anterior y su error. Devuelve el programa (sin el preámbulo)."""
+    selection: TableSelection = state["selection"]
+    plan: QueryPlan = state["plan"]
+    attempt = int(state.get("code_attempts") or 0) + 1
+    candidates = {c.table_id: c for c in state.get("candidates") or []}
+    tables = [
+        (alias, candidates[table_id], deps.table_store.load_table(table_id))
+        for alias, table_id in table_aliases(selection).items()
+    ]
+    feedback = None
+    previous: ExecutionResult | None = state.get("execution")
+    if attempt > 1 and previous is not None and not previous.ok:
+        feedback = describe_feedback(attempt - 1, deps.max_code_attempts, state.get("code") or "", previous)
+    messages = build_codegen_messages(
+        state["question"],
+        plan,
+        selection.covered_part_ids,
+        tables,
+        timeout_s=deps.settings.sandbox_timeout_s,
+        feedback=feedback,
+    )
+    reply = deps.chat_model.invoke(messages)
+    text = reply.text if hasattr(reply, "text") else str(reply)
+    return {"code": extract_code(text), "code_attempts": attempt, "llm_calls": 1}
 
 
 def execute_node(state: AnalystState, deps: AnalystDeps) -> dict[str, Any]:
-    """STUB (Iteración 8: FR-036..FR-038). No ejecuta nada: cada parte ``covered`` queda en
-    ``missing`` con ``CODEGEN_STUB_REASON``.
-
-    La versión real devuelve ``{"execution": ExecutionResult, ...}`` y, al agotar los
-    reintentos, ``missing`` con "falló la ejecución tras N intentos: <error>" (FR-038).
-    """
+    """FR-036 / FR-038: corre el programa en el sandbox con las tablas ``t1..tn`` y valida la
+    salida (§7.6) contra las partes ``covered``. Si falla y no quedan intentos, cada parte
+    ``covered`` queda en ``missing`` con "falló la ejecución tras N intentos: <error>"."""
     selection: TableSelection = state["selection"]
-    missing = [
-        MissingPart(part_id=c.part_id, reason=CODEGEN_STUB_REASON, table_ids=list(c.table_ids))
-        for c in selection.coverage
-        if c.coverage == "covered"
-    ]
-    return {"execution": None, "missing": missing}
+    code = state.get("code") or ""
+    covered = selection.covered_part_ids
+    if not code.strip():
+        execution = ExecutionResult(status="rejected", error=NO_CODE_ERROR, rejected_reasons=[NO_CODE_ERROR])
+    else:
+        tables: Mapping[str, Path] = {
+            alias: deps.table_store.parquet_path(table_id)
+            for alias, table_id in table_aliases(selection).items()
+        }
+        execution = deps.sandbox(code, tables, deps.settings.sandbox_timeout_s, covered_part_ids=covered)
+    attempts = int(state.get("code_attempts") or 0)
+    missing: list[MissingPart] = []
+    if not execution.ok and attempts >= deps.max_code_attempts:
+        reason = EXHAUSTED_REASON.format(attempts=attempts, error=_short(execution.error or execution.status))
+        missing = [
+            MissingPart(part_id=c.part_id, reason=reason, table_ids=list(c.table_ids))
+            for c in selection.coverage
+            if c.coverage == "covered"
+        ]
+    return {"execution": execution, "missing": missing}
+
+
+def route_after_execute(state: AnalystState, deps: AnalystDeps) -> str:
+    """FR-037: vuelve a ``generate_code`` mientras la ejecución falle y queden intentos."""
+    execution: ExecutionResult | None = state.get("execution")
+    if execution is not None and not execution.ok:
+        if int(state.get("code_attempts") or 0) < deps.max_code_attempts:
+            return "generate_code"
+    return "decide_status"
 
 
 # --- decide_status -------------------------------------------------------------------------------
@@ -507,6 +584,7 @@ def respond_node(state: AnalystState, deps: AnalystDeps) -> dict[str, Any]:
         used,
         related_tables=related,
         conversions=(state.get("conversions") or []) if status != "cannot_answer" else [],
+        code=state.get("code") if status != "cannot_answer" else None,
     )
     reply = deps.chat_model.invoke(messages)
     answer = (reply.text if hasattr(reply, "text") else str(reply)).strip()

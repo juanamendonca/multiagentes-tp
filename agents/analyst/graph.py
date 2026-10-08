@@ -3,12 +3,12 @@
 ```
 START → understand_query → retrieve ─(sin candidatas)→ decide_status
                               └→ select_tables ─(ninguna parte covered)→ decide_status
-                                    └→ generate_code → execute → decide_status
+                                    └→ generate_code → execute ─(ok o sin intentos)→ decide_status
+                                            ↑______________│ (falló y quedan intentos, FR-037)
 decide_status → respond → END
 ```
 
-En la Iteración 7 ``generate_code`` y ``execute`` son stubs (ver ``nodes.py``); la Iteración 8
-agrega la arista condicional ``execute → generate_code`` del reintento (FR-037).
+``execute → generate_code`` se repite hasta ``1 + MAX_CODE_RETRIES`` intentos (BR-011).
 
 ``run_analyst`` ejecuta el grafo con ``stream(stream_mode=["updates", "values"])``: cada
 actualización ``{nodo: claves}`` va a ``on_update`` (UI) y el último estado completo se convierte
@@ -34,6 +34,7 @@ from agents.analyst.nodes import (
     generate_code_node,
     respond_node,
     retrieve_node,
+    route_after_execute,
     route_after_retrieve,
     route_after_select,
     select_tables_node,
@@ -81,7 +82,11 @@ def build_analyst_graph(deps: AnalystDeps) -> CompiledStateGraph:
         {"generate_code": "generate_code", "decide_status": "decide_status"},
     )
     graph.add_edge("generate_code", "execute")
-    graph.add_edge("execute", "decide_status")
+    graph.add_conditional_edges(
+        "execute",
+        partial(route_after_execute, deps=deps),
+        {"generate_code": "generate_code", "decide_status": "decide_status"},
+    )
     graph.add_edge("decide_status", "respond")
     graph.add_edge("respond", END)
     return graph.compile(name="analyst")

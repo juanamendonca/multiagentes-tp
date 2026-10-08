@@ -1,5 +1,6 @@
 """Prompts del Analista, en español: entender la pregunta (FR-030), seleccionar tablas
-(FR-033, con las reglas de BR-014/BR-016) y redactar la respuesta (FR-040, FR-041).
+(FR-033, con las reglas de BR-014/BR-016), generar el código de cálculo (FR-035/FR-037, con
+BR-013/BR-014/BR-016 y el contrato de §7.6) y redactar la respuesta (FR-040, FR-041).
 
 El prompt de selección muestra, por candidata, todo lo que permite distinguir tablas casi
 iguales de publicaciones distintas (p. ej. las EPH 2T2025 y 2T2026 de INDEC): archivo, páginas,
@@ -12,15 +13,21 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
+import pandas as pd
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from agents.analyst.schemas import Candidate, MissingPart, QueryPlan
 from agents.analyst.status import Status
-from services.sandbox import ResultItem
+from agents.ingestion.validation import first_text_column
+from services.sandbox import ALLOWED_IMPORTS, ExecutionResult, ResultItem
 from services.vectorstore import format_pages
 
 MAX_PROMPT_ROW_HEADERS = 60
 MAX_PREVIEW_CHARS = 1500
+MAX_CODEGEN_ROWS = 100  # filas de la primera columna de texto listadas una por una (codegen)
+MAX_FEEDBACK_STDERR = 1500  # cola de stderr reenviada en un reintento (D-032)
+MAX_FEEDBACK_STDOUT = 500  # cola de stdout reenviada si la salida no cumple §7.6 (D-032)
+MAX_RESPOND_CODE_CHARS = 3000  # código que ve respond para explicar el cálculo
 
 # --- understand_query ----------------------------------------------------------------------------
 
@@ -64,10 +71,16 @@ candidatas (con metadatos y las primeras filas). Decidís qué tablas usar y, pa
 candidatas tienen TODOS los datos necesarios para calcularla. No calculás nada.
 
 Cómo decidir:
-1. Una parte es `covered` solo si una tabla (o una combinación de tablas) de la lista tiene
-   explícitamente: la métrica pedida, cada entidad pedida (como fila o columna) y cada período pedido
-   (en los nombres de columna, los rótulos de fila, la descripción o la vista previa). Revisá los
-   nombres de columna y los rótulos de fila: ahí están los períodos y las entidades.
+1. Una parte es `covered` si las tablas que elegís para ella, EN CONJUNTO, tienen explícitamente: la
+   métrica pedida, cada entidad pedida (como fila o columna) y cada período pedido (en los nombres de
+   columna, los rótulos de fila, la descripción o la vista previa). Revisá los nombres de columna y
+   los rótulos de fila: ahí están los períodos y las entidades.
+   No hace falta que una sola tabla tenga todo: el código combina tablas. Ej.: piden la tasa de una
+   región en 2T2025 y en 2T2026 (y su variación); la edición 2T2025 de un informe la tiene para
+   2T2025 y la edición 2T2026 para 2T2026 → la parte es covered con las DOS tablas en `table_ids`.
+   Que los datos estén repartidos en varias tablas nunca es motivo de `missing`; pero cada período
+   y cada entidad pedidos tienen que figurar en alguna de las tablas elegidas: si un período pedido
+   no está en ninguna candidata (p. ej. piden 2023 y las tablas son de 2025 y 2026), es `missing`.
 2. Si no, la parte es `missing`, con `missing_reason` (qué dato falta y por qué) y, si hay una tabla
    relacionada, su id en `table_ids` y en `related_table_note` qué cubre esa tabla. Causas de
    `missing` (BR-014), con ejemplos:
@@ -88,9 +101,9 @@ Cómo decidir:
    solo si están todos los períodos, y cuentas entre columnas de la misma unidad.
 4. Tablas casi iguales: los informes de distintos períodos repiten nombres de tabla (p. ej. dos
    ediciones de la EPH con "Principales tasas del mercado de trabajo"). Distinguilas por archivo,
-   sección, páginas y nombres de columna (que traen el año y el trimestre). Elegí la tabla cuyas
-   columnas o filas contienen exactamente el período pedido; si varias lo contienen, preferí la
-   publicación más reciente.
+   sección, páginas y nombres de columna (que traen el año y el trimestre). Para cada período pedido
+   elegí una tabla cuyas columnas, filas o descripción lo contienen; si varias lo contienen, preferí
+   la publicación más reciente (y una sola tabla si ya tiene todos los períodos).
 5. `table_ids` de una parte covered: las tablas necesarias para calcularla (usualmente una; más si
    la parte combina datos de tablas distintas). `selected_table_ids`: todas las tablas usadas por
    las partes covered, sin repetir. Usá solo ids de la lista de candidatas, copiados exactos.
@@ -175,6 +188,185 @@ def build_select_messages(
     return [SystemMessage(content=SELECT_SYSTEM_PROMPT), HumanMessage(content=content)]
 
 
+# --- generate_code -------------------------------------------------------------------------------
+
+CODEGEN_SYSTEM_PROMPT = """Sos el programador de un agente que responde preguntas usando SOLO los valores \
+de tablas extraídas de PDFs. Escribís un programa Python que calcula, con pandas, las partes de la \
+pregunta que te indico, a partir de las tablas que ya están cargadas. Respondé solo con el programa \
+completo, en un único bloque ```python ... ```.
+
+## Cómo acceder a los datos
+- El programa ya tiene definidas estas variables; no las vuelvas a crear ni leas archivos:
+  - `tables`: dict[str, pandas.DataFrame] con las tablas seleccionadas, por alias: `tables["t1"]`, \
+`tables["t2"]`, …
+  - `pd` (pandas) y `np` (numpy).
+- Usá los nombres de columna EXACTOS listados abajo, siempre con `df["..."]` (nunca `df.nombre`): \
+incluyen espacios, acentos, `°`, `*`, `/` y `%`. Copialos tal cual.
+- Los tipos ya vienen correctos: numéricas `float64`/`Int64`, texto `str`. Un dato faltante es \
+`NaN`/`<NA>`, nunca 0. No conviertas texto a número.
+- Las filas se identifican por el texto de la primera columna de texto. Un mismo rótulo puede \
+repetirse en distintos bloques de la tabla (p. ej. "Mujeres" bajo "Actividad" y bajo \
+"Desocupación"): ubicá primero la fila del bloque y después la fila dentro del bloque (con los \
+índices listados o filtrando a partir de la fila del bloque); nunca tomes la primera coincidencia de \
+un rótulo repetido. Compará textos con `.str.strip()`.
+- Solo podés importar: {allowed}.
+- Prohibido: leer o escribir archivos (`open`, `pd.read_*`, `to_csv`, `np.load`, …), red, \
+`eval`/`exec`, `getattr` sobre módulos y atributos que empiecen con `__`. El código que los use se \
+rechaza sin ejecutarse.
+- Límite de tiempo: {timeout} s. La salida se recorta a los últimos 20 000 caracteres: no imprimas \
+tablas enteras.
+
+## Qué calcular y qué reportar como faltante (BR-014, BR-016)
+- Usá solo valores presentes en las tablas. Si falta un período o una entidad, la conversión necesita \
+datos externos (tipo de cambio, inflación, población que no esté en las tablas), falta el valor de \
+comparación pedido, o la unidad es ambigua y cambia el resultado: NO lo calcules ni lo aproximes; poné \
+esa parte en `missing` con el motivo concreto (qué dato falta). Nunca interpoles, extrapoles ni uses \
+el período más cercano.
+- Una parte es todo o nada: si pide varios valores (p. ej. dos períodos) y falta alguno, la parte \
+entera va a `missing` (no la pongas en `results` con solo los valores que encontraste).
+- Conversiones permitidas sin datos externos: cambio de escala (miles ↔ millones, etc.), porcentaje ↔ \
+fracción, sumar meses o trimestres para obtener un año solo si están todos, y cuentas entre columnas \
+de la misma unidad. Declará cada conversión aplicada en `conversions` (p. ej. "miles de personas → \
+millones de personas"). Si la pregunta pide otra escala o unidad que la de la tabla y la conversión \
+está permitida, convertí y declarala.
+- Las diferencias entre tasas en % se expresan en puntos porcentuales ("p.p.").
+
+## Formato de salida
+Imprimí como ÚLTIMA línea de stdout, en una sola línea, este JSON (usá \
+`print(json.dumps(salida, ensure_ascii=False))`):
+{{"results": [{{"part_id": "p1", "label": "<qué es el valor>", "value": <número>, "unit": "<unidad>"}}],
+ "missing": [{{"part_id": "p2", "reason": "<qué dato falta y por qué>"}}],
+ "conversions": ["<conversión aplicada, p. ej. miles → millones>"]}}
+Reglas:
+- Cada parte a calcular ({part_ids}) aparece exactamente una vez: en `results` si la calculaste o en \
+`missing` si falta el dato. No agregues otras partes.
+- `value` es un número finito, una lista de números o un objeto {{"texto": número}}. Convertí con \
+`float(...)` (los enteros de numpy/pandas no se serializan a JSON) y redondeá los valores calculados \
+con `round(x, 4)`. Nunca NaN ni infinito: si el resultado daría NaN, la parte va a `missing`.
+- `label` describe el valor con la entidad y el período (p. ej. "Tasa de desocupación, total 31 \
+aglomerados, 2T2026"); `unit` es la unidad del valor final.
+- No imprimas nada después de esa línea."""
+
+
+def _cell(value: object) -> str:
+    try:
+        if pd.isna(value):  # type: ignore[call-overload]
+            return "<NaN>"
+    except (TypeError, ValueError):
+        pass
+    return " ".join(str(value).split())
+
+
+def describe_codegen_table(alias: str, candidate: Candidate, df: pd.DataFrame) -> str:
+    """Bloque de una tabla para el prompt de codegen (FR-035): alias, nombre, archivo y páginas,
+    columnas EXACTAS con dtype real, tipo, unidad y descripción, la primera columna de texto fila
+    por fila (con su índice de ``df.iloc``) y ``df.head(5)``."""
+    meta = {c.name: c for c in candidate.columns}
+    columns = []
+    for name in df.columns:
+        column = meta.get(str(name))
+        details = [f"dtype {df[name].dtype}"]
+        if column is not None:
+            details.append(f"tipo {column.dtype}")
+            if column.unit:
+                details.append(f"unidad: {column.unit}")
+        line = f"  - {_json(str(name))} ({'; '.join(details)})"
+        if column is not None and column.description:
+            line += f": {column.description}"
+        columns.append(line)
+    pages = format_pages(candidate.pages) if candidate.pages else "págs. ?"
+    lines = [
+        f'### {alias} = tables["{alias}"]: {candidate.name}',
+        f"Archivo: {candidate.file_name} ({pages}); id {candidate.table_id}",
+        f"Descripción: {candidate.description}",
+        f"Tamaño: {len(df)} filas × {len(df.columns)} columnas",
+        "Columnas (nombre exacto entre comillas):",
+        *columns,
+    ]
+    label_column = first_text_column(df)
+    if label_column is not None:
+        values = df[label_column].tolist()
+        lines.append(f"Primera columna de texto {_json(label_column)}, fila por fila (índice: valor):")
+        lines += [f"  {i}: {_cell(v)}" for i, v in enumerate(values[:MAX_CODEGEN_ROWS])]
+        if len(values) > MAX_CODEGEN_ROWS:
+            lines.append(f"  … (+{len(values) - MAX_CODEGEN_ROWS} filas más)")
+    lines += ["df.head(5) (CSV):", df.head(5).to_csv(index=False).strip()]
+    return "\n".join(lines)
+
+
+def describe_feedback(attempt: int, max_attempts: int, code: str, execution: ExecutionResult) -> str:
+    """Feedback de un intento fallido (FR-037, D-032): el código anterior, ``execution.error``
+    (motivo del AST, ``returncode N: <última línea de stderr>``, timeout o violación de §7.6) y
+    la cola de stderr (error/timeout) o de stdout (salida inválida)."""
+    lines = [
+        f"## El intento {attempt} de {max_attempts} falló",
+        "Código anterior:",
+        "```python",
+        code.strip(),
+        "```",
+        f"Error: {execution.error or execution.status}",
+    ]
+    if execution.status in ("error", "timeout") and execution.stderr.strip():
+        lines += [
+            f"Final de stderr (hasta {MAX_FEEDBACK_STDERR} caracteres):",
+            execution.stderr.strip()[-MAX_FEEDBACK_STDERR:],
+        ]
+    if execution.status == "invalid_output":
+        tail = execution.stdout.strip()[-MAX_FEEDBACK_STDOUT:]
+        lines += [f"Final de stdout (hasta {MAX_FEEDBACK_STDOUT} caracteres):", tail or "(vacío)"]
+    lines.append(
+        "Corregí el error y devolvé el programa COMPLETO en un único bloque ```python```, "
+        "respetando todas las reglas."
+    )
+    return "\n".join(lines)
+
+
+def build_codegen_messages(
+    question: str,
+    plan: QueryPlan,
+    covered_part_ids: Sequence[str],
+    tables: Sequence[tuple[str, Candidate, pd.DataFrame]],
+    *,
+    timeout_s: int,
+    feedback: str | None = None,
+) -> list[BaseMessage]:
+    """Mensajes para ``generate_code`` (FR-035). ``tables`` = ``(alias, candidata, df)`` en el
+    orden de los alias ``t1..tn``; ``feedback`` = ``describe_feedback`` del intento anterior."""
+    system = CODEGEN_SYSTEM_PROMPT.format(
+        allowed=", ".join(sorted(ALLOWED_IMPORTS)),
+        timeout=timeout_s,
+        part_ids=", ".join(covered_part_ids),
+    )
+    parts = []
+    for pid in covered_part_ids:
+        part = plan.part(pid)
+        if part is None:
+            continue
+        line = f"- {part.id}: {part.text}"
+        details = [
+            f"operación {_json(part.operation)}" if part.operation else "",
+            f"entidades {_json(part.entities)}" if part.entities else "",
+            f"períodos {_json(part.periods)}" if part.periods else "",
+        ]
+        details = [d for d in details if d]
+        if details:
+            line += f" ({'; '.join(details)})"
+        parts.append(line)
+    content = [
+        f"Pregunta del usuario:\n{question.strip()}",
+        "",
+        "Partes a calcular (part_id: texto):",
+        *parts,
+        "",
+        f"Tablas disponibles ({len(tables)}):",
+        "",
+        "\n\n".join(describe_codegen_table(alias, c, df) for alias, c, df in tables),
+    ]
+    if feedback:
+        content += ["", feedback]
+    return [SystemMessage(content=system), HumanMessage(content="\n".join(content))]
+
+
 # --- respond -------------------------------------------------------------------------------------
 
 RESPOND_SYSTEM_PROMPT = """Redactás la respuesta final, en español, de un agente que responde preguntas \
@@ -182,14 +374,17 @@ usando SOLO tablas extraídas de PDFs. Te paso la pregunta, el estado ya decidid
 resultados calculados (si hay), las tablas usadas y lo que falta. Reglas:
 1. No cambies el estado ni lo contradigas. No inventes valores ni uses conocimiento propio, fuentes
    externas o estimaciones: los únicos números que podés dar como resultado son los de "Resultados".
-2. Si hay resultados: dalos con su unidad, citá las tablas y páginas usadas, explicá en una o dos
-   oraciones cómo se calculó y mencioná las conversiones aplicadas.
+2. Si hay resultados: dalos con su unidad, citá las tablas usadas con su archivo y sus páginas,
+   explicá en una o dos oraciones cómo se calculó (según el código, sin mostrarlo) y mencioná
+   cada conversión aplicada tal como figura en "Conversiones aplicadas".
 3. Por cada parte que falta, explicá el motivo TAL COMO figura en "Partes que faltan" (no deduzcas
    ni inventes otros motivos: si el motivo es que no se pudo calcular, no digas que falta un dato).
    Si la tabla relacionada trae una nota de qué cubre, decila (p. ej. "la tabla cubre 2019–2023;
    2024 no está"); no describas el contenido de las tablas más allá de esas notas.
 4. Si el estado es cannot_answer, no des ningún resultado numérico: explicá qué falta.
-5. Sé breve (1 a 2 párrafos o una lista corta). Sin encabezados ni bloques de código."""
+5. Sé breve (1 a 2 párrafos o una lista corta). Sin encabezados ni bloques de código.
+6. Escribí los números con coma decimal y punto de miles (p. ej. 7,9 %; 1,164 millones; 13.569
+   miles), nunca con punto decimal, para que no se confundan con separadores de miles."""
 
 STATUS_LABELS: dict[str, str] = {
     "answered": "answered (respondida completa)",
@@ -229,9 +424,11 @@ def build_respond_messages(
     tables_used: Sequence[Candidate],
     related_tables: Sequence[Candidate] = (),
     conversions: Sequence[str] = (),
+    code: str | None = None,
 ) -> list[BaseMessage]:
     """Mensajes para redactar la respuesta (FR-040). Con ``cannot_answer`` (FR-041) solo se
-    pasan los faltantes y las tablas relacionadas: ni resultados ni conversiones."""
+    pasan los faltantes y las tablas relacionadas: ni resultados, ni conversiones, ni código.
+    ``code`` (el programa ejecutado, recortado) sirve para explicar brevemente el cálculo."""
     texts = {p.id: p.text for p in plan.parts} if plan else {}
     names_by_id = {c.table_id: f"{c.name} ({c.file_name})" for c in [*tables_used, *related_tables]}
     lines = [f"Pregunta del usuario:\n{question.strip()}", "", f"Estado: {STATUS_LABELS[status]}"]
@@ -243,6 +440,11 @@ def build_respond_messages(
         lines += ["", "Tablas usadas:", describe_tables_used(tables_used) or "(ninguna)"]
         lines += ["", "Conversiones aplicadas:"]
         lines += [f"- {c}" for c in conversions] or ["(ninguna)"]
+        if code and code.strip():
+            snippet = code.strip()
+            if len(snippet) > MAX_RESPOND_CODE_CHARS:
+                snippet = snippet[:MAX_RESPOND_CODE_CHARS] + "\n# … (recortado)"
+            lines += ["", "Código que calculó los resultados (solo para explicar el cálculo):", snippet]
     lines += ["", "Partes que faltan:"]
     if missing:
         for m in missing:

@@ -1,16 +1,16 @@
 # CONTEXT — estado actual del código
 
-Última actualización: Iteración 7 (Analista: entender, recuperar, seleccionar, estado). Rama de trabajo: `feat/qa-tablas`.
+Última actualización: Iteración 8 (Analista: generación, ejecución y autocorrección de código). Rama de trabajo: `feat/qa-tablas`.
 
 ## Current state
 
-- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (292 tests, sin red, ~35–45 s: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno). `pytest -m integration` (16 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s) —estos dos usan un índice efímero propio (D-019)— y `test_analyst_real.py` (LLM real; lee el índice de **producción** en solo lectura, ~35 s).
+- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (304 tests, sin red, ~44 s: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno y 2 tests del grafo Analista otros 3). `pytest -m integration` (20 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s) —estos dos usan un índice efímero propio (D-019)— y `test_analyst_real.py` (LLM real + sandbox; lee el índice de **producción** en solo lectura, ~55–70 s con caché).
 - **Ingesta de punta a punta** (`agents/ingestion/`): `StateGraph` `load_pdf → extract_tables → collect_context → enrich ⇄ validate → (repair) → index` con reintentos por tabla (D-021), reparación BR-008, indexación idempotente (D-020/D-023) y trazas LangSmith `ingestion:<archivo>` con metadata final (D-022). CLI `python -m agents.ingestion <pdf>...`; interfaz `ingest_pdf` / `run_ingestion(..., on_update)`.
 - **Índice de producción `mas-2026s2-tables` creado y cargado**: 33 vectores = 33 tablas de los 3 PDFs de muestra (INDEC 2T2026: 16, INDEC 2T2025: 12, CEPAL: 5), todas `metadata_quality="ok"` al primer intento; `data/tables/` tiene sus 33 `.parquet` + 33 `.json` (gitignored). Inventario en `iterations/05-ingestion-graph.md`.
 - Servicios de base: `config`/`llm` (LiteLLM, caché SQLite que ahora sí funciona con salida estructurada, D-025), `table_parsing`, `pdf_extract`, `pdf_context`, `table_store`, `vectorstore`, `tracing`.
 - **Sandbox de ejecución** (`services/sandbox.py`, independiente de los agentes): chequeo AST, subproceso `python -I -X utf8` con cwd temporal que solo tiene los Parquet seleccionados (`t1.parquet`…), entorno mínimo, preámbulo que carga `tables` y después bloquea `open`/sockets, timeout con muerte del árbol de procesos y salida acotada; `parse_result_line` valida el contrato §7.6 (D-026..D-028). Probado también a mano con un Parquet real de INDEC.
-- **Analista sin código** (`agents/analyst/`): `StateGraph` `understand_query → retrieve → select_tables → generate_code → execute → decide_status → respond` con atajos `retrieve → decide_status` (sin candidatas, FR-032) y `select_tables → decide_status` (ninguna parte `covered`, FR-034). Plan estructurado (FR-030), recuperación con 1 llamada de embeddings y dedupe por score máximo (D-029), descarte de candidatas sin Parquet (FR-042), selección con metadatos completos + `preview_csv` normalizada en código (D-030), estado determinístico `decide_status` (BR-015) y respuesta en español (FR-040/041). Trazas `analyst:<60 chars>` con `status`, `selected_table_ids`, `code_attempts` (verificado en LangSmith real). CLI `python -m agents.analyst "<pregunta>"`; interfaz `ask` / `run_analyst(..., on_update)`.
-- **`generate_code` y `execute` son STUBS**: toda parte `covered` termina `missing` con "codegen no implementado", así que hoy toda pregunta termina `cannot_answer` (la Iteración 8 los reemplaza). Todavía no hay UI.
+- **Analista de punta a punta** (`agents/analyst/`): `StateGraph` `understand_query → retrieve → select_tables → generate_code → execute → decide_status → respond` con atajos `retrieve → decide_status` (sin candidatas, FR-032), `select_tables → decide_status` (ninguna parte `covered`, FR-034) y el ciclo `execute → generate_code` mientras la ejecución falle y queden intentos (FR-037, ≤ `1 + MAX_CODE_RETRIES`; al agotar, FR-038). Plan estructurado (FR-030), recuperación con 1 llamada de embeddings y dedupe por score máximo (D-029), descarte de candidatas sin Parquet (FR-042), selección con metadatos + `preview_csv` (D-030; puede combinar tablas, D-034), codegen con columnas exactas/dtypes/unidades/primera columna fila por fila/`df.head(5)` (FR-035, D-033), ejecución en el sandbox real con validación §7.6 (FR-036), feedback de error en reintentos (D-032), estado determinístico `decide_status` (BR-015) y respuesta en español con resultados, tablas + páginas, conversiones y explicación del cálculo (FR-040/041). Trazas `analyst:<60 chars>` con `status`, `selected_table_ids`, `code_attempts` y un span por cada `generate_code`/`execute` (VC-081, verificado en LangSmith real). CLI `python -m agents.analyst "<pregunta>"` (muestra también código y ejecución); interfaz `ask` / `run_analyst(..., on_update)`.
+- Preguntas reales verificadas a mano (record 08): tasa de desocupación 31 aglomerados 2T2026 = 7,9 % y +0,3 p.p. vs 2T2025 (1 tabla); GBA 8,7 % (2T2025) → 8,2 % (2T2026), −0,5 p.p. (2 tablas, 2 PDFs); 1.164 miles = 1,164 millones de desocupados (conversión declarada). Todavía no hay UI.
 
 ## File map
 
@@ -54,9 +54,11 @@ agents/analyst/schemas.py       QueryPart, QueryPlan, PartCoverage, TableSelecti
                                 Status, Coverage, MAX_PARTS, MAX_SEARCH_QUERIES
 agents/analyst/status.py        decide_status, answered_part_ids (BR-015, funciones puras)
 agents/analyst/state.py         AnalystState (TypedDict) + contrato de los nodos de código (docstring)
-agents/analyst/prompts.py       UNDERSTAND/SELECT/RESPOND_SYSTEM_PROMPT, build_*_messages, describe_candidate, fallback_answer
-agents/analyst/nodes.py         AnalystDeps, build_default_deps, *_node, route_after_retrieve/select, merge_matches,
-                                normalize_selection, build_missing, fallback_plan, *_REASON
+agents/analyst/prompts.py       UNDERSTAND/SELECT/CODEGEN/RESPOND_SYSTEM_PROMPT, build_*_messages (incl. build_codegen_messages),
+                                describe_candidate, describe_codegen_table, describe_feedback, fallback_answer
+agents/analyst/nodes.py         AnalystDeps (+ sandbox), build_default_deps, *_node, route_after_retrieve/select/execute,
+                                merge_matches, normalize_selection, build_missing, fallback_plan, extract_code,
+                                table_aliases, SandboxRunner, EXHAUSTED_REASON, NO_CODE_ERROR, *_REASON
 agents/analyst/graph.py         build_analyst_graph, run_analyst, ask, initial_state, trace_run_name, trace_metadata,
                                 result_from_state, NODE_NAMES, TRACE_PREFIX
 agents/analyst/__main__.py      CLI del Analista
@@ -77,8 +79,10 @@ tests/integration/test_sample_pdfs.py  VC-090 (técnica), VC-015 sobre PDFs real
 tests/integration/test_pinecone.py     VC-003, VC-027 (vectorstore), NFR-005 reales
 tests/integration/test_ingestion_real.py  VC-021, VC-027 (reingesta real), VC-080
 tests/unit/test_status.py              VC-050 (tabla de verdad de decide_status)
-tests/unit/test_analyst_graph.py       VC-041, VC-042, VC-044, VC-052, VC-056, normalización, stubs, NFR-006 (parcial), traza
-tests/integration/test_analyst_real.py VC-040 (`-k plan`) y pregunta sin relación → cannot_answer (índice de producción, solo lectura)
+tests/unit/test_analyst_graph.py       VC-041, 042, 044, 045, 047, 048 (grafo), 049, 052, 056, NFR-006, extract_code, traza (FakeSandbox;
+                                       VC-045/047 con el sandbox real)
+tests/integration/test_analyst_real.py VC-040 (`-k plan`), sin relación → cannot_answer, 1 tabla (7,9 / 0,3), VC-043, VC-051, VC-081
+                                       (índice de producción, solo lectura)
 ```
 
 Layout futuro fijado por el plan: `app.py`, `ui/`, `eval/`.
@@ -194,18 +198,25 @@ class AnalystResult(BaseModel): question; status; answer; plan; candidates; sele
     .selected_tables -> list[Candidate]   # en el orden de selected_table_ids = orden de los alias t1..tn
 def decide_status(plan, selection, execution) -> Status          # BR-015; cualquiera puede ser None
 def answered_part_ids(plan, selection, execution) -> set[str]   # A = covered ∩ results de una ejecución ok − missing del código
-@dataclass class AnalystDeps: settings; chat_model; embeddings; vector_store_factory: Callable[[], VectorStore | None]; table_store
-    .vector_store() (perezoso, una vez); .max_code_attempts (= 1 + MAX_CODE_RETRIES)
+@dataclass class AnalystDeps: settings; chat_model; embeddings; vector_store_factory: Callable[[], VectorStore | None]; table_store;
+    sandbox: SandboxRunner = run_in_sandbox      # .vector_store() (perezoso, una vez); .max_code_attempts (= 1 + MAX_CODE_RETRIES)
 def build_default_deps(settings) -> AnalystDeps          # LiteLLM + open_index (perezoso, solo lectura) + TableStore
 def build_analyst_graph(deps) -> CompiledStateGraph       # nodos NODE_NAMES
 def run_analyst(question, deps=None, *, on_update=None) -> AnalystResult;  def ask(question, deps=None) -> AnalystResult
 class AnalystState(TypedDict): question, plan, candidates, selection, code, code_attempts, execution, results, missing, conversions,
     status, answer, run_url, warnings (suma), llm_calls (suma), embedding_calls (suma)
+def extract_code(text) -> str          # primer bloque ```python``` (o sin lenguaje; si no hay, el texto)
+def table_aliases(selection) -> dict[str, str]   # {"t1": selected_table_ids[0], ...}
+def build_codegen_messages(question, plan, covered_part_ids, tables: [(alias, Candidate, df)], *, timeout_s, feedback=None)
+def describe_feedback(attempt, max_attempts, code, execution) -> str   # D-032
+def build_respond_messages(..., conversions=(), code=None)   # code solo si status != cannot_answer
 ```
 
-**Contrato para la Iteración 8 (nodos de código):** `generate_code` devuelve `{"code": str, "code_attempts": n + 1, "llm_calls": 1}`; `execute` devuelve `{"execution": ExecutionResult}` y, al agotar intentos (FR-038), `missing=[MissingPart(part_id, reason="falló la ejecución tras N intentos: <error>", table_ids)]` para las partes `covered`. `decide_status` (no cambia) calcula `status` con `decide_status(plan, selection, execution)`, deja en `results`/`conversions` solo lo de las partes respondidas (`execution.parsed`) y **reemplaza** `missing` por la lista final, una entrada por parte no respondida: motivo de la selección (+ `related_table_note`, `table_ids`) o, para `covered` sin resultado, el `missing` del estado → `execution.parsed.missing` → error de ejecución. `respond` recibe `results`, `conversions`, tablas usadas (`selected_table_ids` → candidatas, con archivo y páginas) y faltantes (con nombre de tabla relacionada); con `cannot_answer` solo faltantes y tablas relacionadas. Alias del sandbox: `t{i}` = `selection.selected_table_ids[i-1]` (= tablas de las partes `covered`).
+**Contrato de los nodos de código (FR-035..FR-038):** `generate_code` devuelve `{"code": str (sin preámbulo), "code_attempts": n + 1, "llm_calls": 1}` (en reintentos el prompt lleva el código anterior y su error); `execute` devuelve `{"execution": ExecutionResult, "missing": [...]}`: `missing` vacío salvo al agotar intentos (FR-038: `MissingPart(part_id, reason="falló la ejecución tras N intentos: <error ≤ 300 chars>", table_ids)` por parte `covered`). Código vacío → `ExecutionResult(status="rejected", error=NO_CODE_ERROR)` sin lanzar el sandbox. `route_after_execute`: `generate_code` si `not execution.ok` y `code_attempts < max_code_attempts`, si no `decide_status`. `decide_status` fija `status`, `results`/`conversions` (solo partes respondidas) y reemplaza `missing` por la lista final (motivo de la selección, del código o del error). Alias: `t{i}` = `selection.selected_table_ids[i-1]` (= tablas de las partes `covered`), igual en prompt y sandbox.
 
-**Eventos de `stream` del Analista:** `understand_query` → `plan`, `llm_calls`, `warnings`; `retrieve` → `candidates`, `warnings` (FR-042, índice inexistente), `embedding_calls`; `select_tables` → `selection`, `llm_calls`, `warnings`; `generate_code` → `code`, `code_attempts`; `execute` → `execution`, `missing`; `decide_status` → `status`, `results`, `conversions`, `missing`; `respond` → `answer`, `llm_calls`.
+**`AnalystResult` completo (lo que muestran UI y eval):** `question`, `status`, `answer`, `plan`, `candidates`, `selection` (+ `.selected_tables`: candidatas elegidas con `file_name`/`pages`, en orden de alias), `results: list[ResultItem]` (`part_id`, `label`, `value` número/lista/dict, `unit`), `missing: list[MissingPart]` (`reason`, `related_table_note`, `table_ids`), `conversions`, `code` (último programa), `code_attempts` (reintentos = `code_attempts - 1`), `execution` (`status`, `stdout`, `stderr`, `returncode`, `duration_s`, `parsed`, `error`, `*_truncated`), `warnings`, `llm_calls`, `embedding_calls`, `run_id` (run raíz LangSmith), `run_url` (`None`: la arma la UI, Iteración 9), `elapsed_s`.
+
+**Eventos de `stream` del Analista:** `understand_query` → `plan`, `llm_calls`, `warnings`; `retrieve` → `candidates`, `warnings` (FR-042, índice inexistente), `embedding_calls`; `select_tables` → `selection`, `llm_calls`, `warnings`; `generate_code` → `code`, `code_attempts`, `llm_calls` (se repite por intento); `execute` → `execution`, `missing` (se repite por intento); `decide_status` → `status`, `results`, `conversions`, `missing`; `respond` → `answer`, `llm_calls`.
 
 **Eventos de `stream` de la Ingesta (`on_update(nodo, actualización)`; claves que devuelve cada nodo):**
 
@@ -245,7 +256,7 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 - Trazas (D-022): run raíz `ingestion:<archivo>` con `run_id` propio; metadata final vía `RootMetadataTracer`; entradas/salidas saneadas (sin bytes ni DataFrames). Toda dataclass grande que entre al estado de un grafo debería tener `trace_summary()`.
 - Tests contra servicios reales: índice efímero `<PINECONE_INDEX_NAME>-itest-<6 hex>` borrado en `finally`, `TABLES_DIR` temporal (D-019); nunca escriben en producción. Las trazas de los tests sí van al proyecto real.
 - Encabezados (D-012), separador decimal por documento (D-008), unión multipágina (BR-001 + D-013/D-015), contexto (D-014): sin cambios.
-- **Analista (D-029..D-031):** nunca escribe en Pinecone (`open_index`, sin crear); una sola llamada de embeddings por pregunta; el LLM no decide el estado (BR-015, `decide_status` puro); la salida del LLM se normaliza en código (ids de partes, consultas, ids de tablas que no son candidatas, partes sin evaluar); una salida que no parsea degrada (plan de una parte / todo `missing`) con aviso, otros errores del proxy se propagan. Con `cannot_answer`, `results == []` siempre.
+- **Analista (D-029..D-034):** el codegen recibe solo las tablas elegidas por alias y nunca rutas; el sandbox (inyectable en `AnalystDeps.sandbox`) valida §7.6 contra las partes `covered`; ≤ `1 + MAX_CODE_RETRIES` llamadas de codegen (NFR-006: ≤ `4 + MAX_CODE_RETRIES` de chat por pregunta). Tests `[U]` usan `FakeSandbox` salvo 2 (sandbox real, ~1–2 s por ejecución). Nunca escribe en Pinecone (`open_index`, sin crear); una sola llamada de embeddings por pregunta; el LLM no decide el estado (BR-015, `decide_status` puro); la salida del LLM se normaliza en código (ids de partes, consultas, ids de tablas que no son candidatas, partes sin evaluar); una salida que no parsea degrada (plan de una parte / todo `missing`) con aviso, otros errores del proxy se propagan. Con `cannot_answer`, `results == []` siempre.
 - **Sandbox (D-026..D-028):** el código generado nunca lee archivos: usa `tables["tN"]` (alias `t1..tn` en el orden de las tablas elegidas), `pd` y `np` del preámbulo; nombres de columna exactos con `df["…"]`. El hijo corre `sys.executable -I -X utf8 <tmp>/main.py` con cwd `<tmp>/work/` (solo `tN.parquet`), entorno `PATH`+`SYSTEMROOT`+`SYSTEMDRIVE`+`TEMP`/`TMP` propios; al timeout se mata el árbol con `psutil` (en Windows el `python.exe` del venv es un lanzador). `static_check=False` solo en tests. No es una frontera de seguridad del SO (README final).
 
 ## Commands
@@ -263,7 +274,7 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 # integración del Analista (LLM real + índice de producción en solo lectura; usar caché)
 $env:LLM_CACHE="true"; .venv\Scripts\python -m pytest -m integration tests/integration/test_analyst_real.py -v
 # preguntar desde la consola
-$env:LLM_CACHE="true"; .venv\Scripts\python -m agents.analyst "¿Cuál fue la tasa de desocupación del total de 31 aglomerados en el 2° trimestre de 2026?"
+$env:LLM_CACHE="true"; .venv\Scripts\python -m agents.analyst "¿Cuál fue la tasa de desocupación del total de 31 aglomerados en el 2° trimestre de 2026 y cuánto cambió respecto del 2° trimestre de 2025?"
 # tests del grafo de ingesta (sin red)
 .venv\Scripts\python -m pytest tests/unit/test_ingestion_validate.py tests/unit/test_ingestion_graph.py -v
 # integración: ingesta real (LLM + Pinecone efímero + LangSmith, ~35 s; usar caché)
@@ -283,8 +294,9 @@ git ls-files .env
 
 ## Known gaps
 
-- **STUB → Iteración 8:** `generate_code` y `execute` (`agents/analyst/nodes.py`) no llaman al LLM ni al sandbox: cada parte `covered` queda `missing` con "codegen no implementado" y la pregunta termina `cannot_answer`. Falta: prompt de codegen (texto sugerido en `iterations/06-sandbox.md`), `run_in_sandbox`, arista de reintento `execute → generate_code` (FR-037/038), VC-043/045/047/048/049/051/081 y NFR-006 completo. El sandbox (Iteración 6) sigue sin consumidor. Límites conocidos del sandbox: sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store).
-- UI (9: FR-056 (pregunta vacía o > 1 000 caracteres) no se valida en `ask`; mostrar `IngestionResult`, FR-025 con vista previa vía `TableStore.load_table`, FR-004 al arrancar con `ensure_index`), evaluación (10). `run_url` de LangSmith: hoy solo `run_id` (`AnalystResult.run_url` y `state.run_url` quedan `None`; FR-055).
+- Límites conocidos del sandbox (D-026): sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store). Cada ejecución real cuesta ~1–8 s según la carga del equipo (arranque + `import pandas`).
+- Analista con datos reales (record 08): (1) la recuperación no siempre trae todas las tablas útiles (p. ej. "personas desocupadas en GBA 2T2026" no recupera `b0a700bac4db8192-p019-t0`, cuyo nombre es "Población de referencia por región"): esas preguntas terminan `cannot_answer` honesto; (2) el selector, tras D-034, a veces marca `covered` partes con un período que no está (p. ej. 2023): la segunda barrera es el código, que las reporta en `missing` con el motivo (resultado correcto, gasta 1 llamada de codegen y 1 ejecución); (3) el selector a veces agrega una tabla extra no usada por el código (aparece en "tablas usadas"). Medir en la Iteración 10.
+- UI (9: FR-056 (pregunta vacía o > 1 000 caracteres) no se valida en `ask`; mostrar `IngestionResult`, FR-025 con vista previa vía `TableStore.load_table`, FR-004 al arrancar con `ensure_index`), evaluación (10). `run_url` de LangSmith: hoy solo `run_id` (`AnalystResult.run_url` y `state.run_url` quedan `None`; FR-055 → Iteración 9, p. ej. `langsmith.Client().get_run_url(run=..., project_name=...)` o la URL del proyecto + `run_id`).
 - `.env` tiene `LLM_CACHE=false`; para desarrollo exportar `LLM_CACHE=true` (el proceso gana sobre `.env`). El nombre de archivo va en el prompt de `enrich`: reingerir con otro nombre no usa la caché. `IngestionResult.llm_calls` cuenta invocaciones (incluidas las servidas por la caché).
 - Metadatos reales (revisados a mano, ver record 05): nombres a veces sin período (las dos EPH tienen "Principales tasas del mercado de trabajo"; el período está en la descripción, la sección y las columnas), abreviaturas ("ALC", "2T 2026"); columnas trimestrales de INDEC con mezcla de unidades por fila en el Cuadro 1.3 ("miles de personas o %"); filas de subtítulo de INDEC (`"Sexo y grupos de edad"`) aparecen en `row_headers`; CEPAL tiene notas pegadas a rótulos (`"Argentinab"`) y columnas `Country`/`Age` en inglés; tablas sin encabezado de primera columna quedan `col_0`/`col_4`.
 - Sección errónea en EPH 2T2025 p004 (resumen ejecutivo): "Dentro de la población ocupada (44,5%) se destacó que:" (bloque en negrita, D-014) y una fila sin rótulo.
