@@ -33,6 +33,7 @@ from services.vectorstore import (
     embed_texts,
     ensure_index,
     metadata_size,
+    open_index,
     query,
     upsert_records,
 )
@@ -110,6 +111,22 @@ def test_ensure_index_accepts_another_index_name() -> None:
     ensure_index(SETTINGS, client, index_name="otro")
 
     assert client.created[0]["name"] == "otro"
+
+
+def test_open_index_is_read_only() -> None:
+    """Given el Analista (no escribe en Pinecone), when el índice no existe, then open_index
+    devuelve None sin crearlo; si existe con la dimensión correcta, devuelve el store; con otra
+    dimensión, IndexDimensionMismatch (FR-004)."""
+    missing = FakePineconeClient()
+    assert open_index(SETTINGS, missing) is None
+    assert missing.created == [] and missing.index_objects == {}
+
+    existing = FakePineconeClient({"tablas-test": {"dimension": SETTINGS.embedding_dim, "metric": "cosine"}})
+    store = open_index(SETTINGS, existing)
+    assert store is not None and store.name == "tablas-test" and existing.created == []
+
+    with pytest.raises(IndexDimensionMismatch):
+        open_index(replace(SETTINGS, embedding_dim=SETTINGS.embedding_dim + 1), existing)
 
 
 # --- texto de embedding (BR-009, VC-025) ---------------------------------------------------------

@@ -226,6 +226,25 @@ def ensure_index(
     return PineconeVectorStore(index, name=name)
 
 
+def open_index(
+    settings: Settings, client: Any | None = None, *, index_name: str | None = None
+) -> PineconeVectorStore | None:
+    """Versión de solo lectura de ``ensure_index`` para el Analista (que no escribe en Pinecone):
+    devuelve ``None`` si el índice no existe (no lo crea) y lanza ``IndexDimensionMismatch`` si
+    existe con otra dimensión (FR-004)."""
+    client = client if client is not None else make_pinecone_client(settings)
+    name = index_name or settings.pinecone_index_name
+    if not client.has_index(name):
+        return None
+    description = client.describe_index(name)
+    dimension = _index_dimension(description)
+    if dimension != settings.embedding_dim:
+        raise IndexDimensionMismatch(name, dimension, settings.embedding_dim)
+    host = getattr(description, "host", None)
+    index = client.Index(name=name, host=host) if host else client.Index(name=name)
+    return PineconeVectorStore(index, name=name)
+
+
 # --- Texto de embedding y metadata ---------------------------------------------------------------
 
 

@@ -1,15 +1,16 @@
 # CONTEXT — estado actual del código
 
-Última actualización: Iteración 6 (sandbox). Rama de trabajo: `feat/qa-tablas`.
+Última actualización: Iteración 7 (Analista: entender, recuperar, seleccionar, estado). Rama de trabajo: `feat/qa-tablas`.
 
 ## Current state
 
-- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (256 tests, sin red, ~30–45 s: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno). `pytest -m integration` (14 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) y `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s); los dos últimos usan un índice efímero propio (D-019).
+- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (292 tests, sin red, ~35–45 s: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno). `pytest -m integration` (16 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s) —estos dos usan un índice efímero propio (D-019)— y `test_analyst_real.py` (LLM real; lee el índice de **producción** en solo lectura, ~35 s).
 - **Ingesta de punta a punta** (`agents/ingestion/`): `StateGraph` `load_pdf → extract_tables → collect_context → enrich ⇄ validate → (repair) → index` con reintentos por tabla (D-021), reparación BR-008, indexación idempotente (D-020/D-023) y trazas LangSmith `ingestion:<archivo>` con metadata final (D-022). CLI `python -m agents.ingestion <pdf>...`; interfaz `ingest_pdf` / `run_ingestion(..., on_update)`.
 - **Índice de producción `mas-2026s2-tables` creado y cargado**: 33 vectores = 33 tablas de los 3 PDFs de muestra (INDEC 2T2026: 16, INDEC 2T2025: 12, CEPAL: 5), todas `metadata_quality="ok"` al primer intento; `data/tables/` tiene sus 33 `.parquet` + 33 `.json` (gitignored). Inventario en `iterations/05-ingestion-graph.md`.
 - Servicios de base: `config`/`llm` (LiteLLM, caché SQLite que ahora sí funciona con salida estructurada, D-025), `table_parsing`, `pdf_extract`, `pdf_context`, `table_store`, `vectorstore`, `tracing`.
 - **Sandbox de ejecución** (`services/sandbox.py`, independiente de los agentes): chequeo AST, subproceso `python -I -X utf8` con cwd temporal que solo tiene los Parquet seleccionados (`t1.parquet`…), entorno mínimo, preámbulo que carga `tables` y después bloquea `open`/sockets, timeout con muerte del árbol de procesos y salida acotada; `parse_result_line` valida el contrato §7.6 (D-026..D-028). Probado también a mano con un Parquet real de INDEC.
-- Todavía no hay Analista (Iteraciones 7–8) ni UI.
+- **Analista sin código** (`agents/analyst/`): `StateGraph` `understand_query → retrieve → select_tables → generate_code → execute → decide_status → respond` con atajos `retrieve → decide_status` (sin candidatas, FR-032) y `select_tables → decide_status` (ninguna parte `covered`, FR-034). Plan estructurado (FR-030), recuperación con 1 llamada de embeddings y dedupe por score máximo (D-029), descarte de candidatas sin Parquet (FR-042), selección con metadatos completos + `preview_csv` normalizada en código (D-030), estado determinístico `decide_status` (BR-015) y respuesta en español (FR-040/041). Trazas `analyst:<60 chars>` con `status`, `selected_table_ids`, `code_attempts` (verificado en LangSmith real). CLI `python -m agents.analyst "<pregunta>"`; interfaz `ask` / `run_analyst(..., on_update)`.
+- **`generate_code` y `execute` son STUBS**: toda parte `covered` termina `missing` con "codegen no implementado", así que hoy toda pregunta termina `cannot_answer` (la Iteración 8 los reemplaza). Todavía no hay UI.
 
 ## File map
 
@@ -20,7 +21,7 @@ ruff.toml / pytest.ini    lint (py311, 110 cols, E,F,I,UP,B) / tests (marker `in
 .gitignore                .env, .venv, caches, data/tables/, .langchain.db
 assignment.es.md          enunciado del TP
 notebooks/00_litellm_exploracion.ipynb   exploración del proxy (OQ-1); sin outputs
-specs/                    spec (v0.7), plan y este directorio de artefactos
+specs/                    spec (v0.8), plan y este directorio de artefactos
 services/config.py        Settings, load_settings, ConfigError, REQUIRED_VARS
 services/llm.py           get_chat_model, get_embeddings, SQLiteCache (+ D-025), enable_cache_if_configured
 services/table_parsing.py flatten_header, parse_number, infer_decimal_separator, is_missing_marker,
@@ -29,7 +30,7 @@ services/pdf_extract.py   load_pdf, extract_tables, LoadedPdf, PageText, TextBlo
                           IngestionWarning, PdfOpenError, is_page_furniture, CAPTION_RE, REASON_*
 services/pdf_context.py   collect_context, TableContext
 services/table_store.py   TableStore, make_table_id, doc_prefix, ensure_parquet_safe, TABLE_ID_RE
-services/vectorstore.py   VectorStore (Protocol), PineconeVectorStore, ensure_index, make_pinecone_client,
+services/vectorstore.py   VectorStore (Protocol), PineconeVectorStore, ensure_index, open_index, make_pinecone_client,
                           build_embedding_text, build_metadata, decode_metadata, metadata_size, embed_texts,
                           build_vector_records, upsert_records, delete_stale, query, count_vectors, format_pages,
                           VectorRecord, Match, IndexDimensionMismatch, IndexingError, MetadataTooLarge
@@ -48,6 +49,17 @@ agents/ingestion/nodes.py       IngestionDeps, build_default_deps, *_node, route
 agents/ingestion/graph.py       build_ingestion_graph, run_ingestion, ingest_pdf, IngestionResult, initial_state,
                                 trace_metadata, result_from_state, NODE_NAMES, TRACE_PREFIX
 agents/ingestion/__main__.py    CLI de ingesta
+agents/analyst/__init__.py      paquete (sin lógica; no importar grafos acá)
+agents/analyst/schemas.py       QueryPart, QueryPlan, PartCoverage, TableSelection, Candidate, MissingPart, AnalystResult,
+                                Status, Coverage, MAX_PARTS, MAX_SEARCH_QUERIES
+agents/analyst/status.py        decide_status, answered_part_ids (BR-015, funciones puras)
+agents/analyst/state.py         AnalystState (TypedDict) + contrato de los nodos de código (docstring)
+agents/analyst/prompts.py       UNDERSTAND/SELECT/RESPOND_SYSTEM_PROMPT, build_*_messages, describe_candidate, fallback_answer
+agents/analyst/nodes.py         AnalystDeps, build_default_deps, *_node, route_after_retrieve/select, merge_matches,
+                                normalize_selection, build_missing, fallback_plan, *_REASON
+agents/analyst/graph.py         build_analyst_graph, run_analyst, ask, initial_state, trace_run_name, trace_metadata,
+                                result_from_state, NODE_NAMES, TRACE_PREFIX
+agents/analyst/__main__.py      CLI del Analista
 scripts/inspect_pdf.py    CLI de inspección de tablas extraídas (sin LLM ni red)
 data/sample_pdfs/         3 PDFs reales + SOURCES.md (versionados)
 data/tables/              Parquet + JSON de las tablas ingeridas (gitignored; hoy 33 tablas)
@@ -64,9 +76,12 @@ tests/unit/test_sandbox.py             VC-046, VC-048, VC-060..VC-065, NFR-004 (
 tests/integration/test_sample_pdfs.py  VC-090 (técnica), VC-015 sobre PDFs reales (sin red)
 tests/integration/test_pinecone.py     VC-003, VC-027 (vectorstore), NFR-005 reales
 tests/integration/test_ingestion_real.py  VC-021, VC-027 (reingesta real), VC-080
+tests/unit/test_status.py              VC-050 (tabla de verdad de decide_status)
+tests/unit/test_analyst_graph.py       VC-041, VC-042, VC-044, VC-052, VC-056, normalización, stubs, NFR-006 (parcial), traza
+tests/integration/test_analyst_real.py VC-040 (`-k plan`) y pregunta sin relación → cannot_answer (índice de producción, solo lectura)
 ```
 
-Layout futuro fijado por el plan: `app.py`, `agents/analyst/`, `ui/`, `eval/`.
+Layout futuro fijado por el plan: `app.py`, `ui/`, `eval/`.
 
 ## Public interfaces
 
@@ -110,6 +125,8 @@ def decode_metadata(metadata) -> dict    # pages → list[int], columns → list
 def embed_texts(embeddings, texts, *, batch_size=64, expected_dim=None) -> list[list[float]]
 def upsert_records(store, items, vectors, texts=None) -> int      # IndexingError(indexed, total, cause)
 def delete_stale(store, doc_hash, keep_ids) -> list[str]; def count_vectors(store, *, expected=None, timeout_s=30) -> int
+def open_index(settings, client=None, *, index_name=None) -> PineconeVectorStore | None   # solo lectura (Analista): None si no existe
+@dataclass(frozen) class Match: id; score; metadata (cruda: leer con decode_metadata)
 ```
 
 ```python
@@ -162,7 +179,35 @@ def summarize_stderr(stderr, max_chars=300) -> str   # última línea no vacía 
 
 `status`: `rejected` = no se ejecutó (AST; `pid`/`returncode` `None`); `error` = returncode ≠ 0 (`error` = `"returncode N: <última línea de stderr>"`); `timeout` (`returncode` `None`); `invalid_output` = returncode 0 pero falla §7.6 (solo si se pasó `covered_part_ids`); `ok`. `error` es el texto para el feedback del reintento (FR-037). stdout/stderr guardan los **últimos** 20 000 caracteres.
 
-**Eventos de `stream` (`on_update(nodo, actualización)`; claves que devuelve cada nodo):**
+```python
+# agents/analyst  (spec §7.5, §7.7; D-029..D-031)
+Status = Literal["answered", "partial", "cannot_answer"]
+class QueryPart: id "p1".."pn" (renumerado en código); text; metrics; entities; periods; operation; search_queries (1..3, limpiadas)
+class QueryPlan: parts (1..5); .part_ids; .part(id)
+class PartCoverage: part_id; coverage "covered"|"missing"; table_ids=[]; missing_reason=None; related_table_note=None
+class TableSelection: selected_table_ids; coverage; rationale=""; .covered_part_ids; .coverage_of(id)
+class Candidate: table_id; score (máx.); name; description; columns: list[ColumnMeta]; row_headers; file_name; pages: list[int];
+                 section; n_rows; n_cols; preview_csv; metadata_quality; matched_parts; matched_queries
+class MissingPart: part_id; reason; related_table_note=None; table_ids=[]
+class AnalystResult(BaseModel): question; status; answer; plan; candidates; selection; results: list[ResultItem]; missing: list[MissingPart];
+    conversions; code; code_attempts; execution: ExecutionResult|None; warnings; llm_calls; embedding_calls; run_id; run_url (None); elapsed_s
+    .selected_tables -> list[Candidate]   # en el orden de selected_table_ids = orden de los alias t1..tn
+def decide_status(plan, selection, execution) -> Status          # BR-015; cualquiera puede ser None
+def answered_part_ids(plan, selection, execution) -> set[str]   # A = covered ∩ results de una ejecución ok − missing del código
+@dataclass class AnalystDeps: settings; chat_model; embeddings; vector_store_factory: Callable[[], VectorStore | None]; table_store
+    .vector_store() (perezoso, una vez); .max_code_attempts (= 1 + MAX_CODE_RETRIES)
+def build_default_deps(settings) -> AnalystDeps          # LiteLLM + open_index (perezoso, solo lectura) + TableStore
+def build_analyst_graph(deps) -> CompiledStateGraph       # nodos NODE_NAMES
+def run_analyst(question, deps=None, *, on_update=None) -> AnalystResult;  def ask(question, deps=None) -> AnalystResult
+class AnalystState(TypedDict): question, plan, candidates, selection, code, code_attempts, execution, results, missing, conversions,
+    status, answer, run_url, warnings (suma), llm_calls (suma), embedding_calls (suma)
+```
+
+**Contrato para la Iteración 8 (nodos de código):** `generate_code` devuelve `{"code": str, "code_attempts": n + 1, "llm_calls": 1}`; `execute` devuelve `{"execution": ExecutionResult}` y, al agotar intentos (FR-038), `missing=[MissingPart(part_id, reason="falló la ejecución tras N intentos: <error>", table_ids)]` para las partes `covered`. `decide_status` (no cambia) calcula `status` con `decide_status(plan, selection, execution)`, deja en `results`/`conversions` solo lo de las partes respondidas (`execution.parsed`) y **reemplaza** `missing` por la lista final, una entrada por parte no respondida: motivo de la selección (+ `related_table_note`, `table_ids`) o, para `covered` sin resultado, el `missing` del estado → `execution.parsed.missing` → error de ejecución. `respond` recibe `results`, `conversions`, tablas usadas (`selected_table_ids` → candidatas, con archivo y páginas) y faltantes (con nombre de tabla relacionada); con `cannot_answer` solo faltantes y tablas relacionadas. Alias del sandbox: `t{i}` = `selection.selected_table_ids[i-1]` (= tablas de las partes `covered`).
+
+**Eventos de `stream` del Analista:** `understand_query` → `plan`, `llm_calls`, `warnings`; `retrieve` → `candidates`, `warnings` (FR-042, índice inexistente), `embedding_calls`; `select_tables` → `selection`, `llm_calls`, `warnings`; `generate_code` → `code`, `code_attempts`; `execute` → `execution`, `missing`; `decide_status` → `status`, `results`, `conversions`, `missing`; `respond` → `answer`, `llm_calls`.
+
+**Eventos de `stream` de la Ingesta (`on_update(nodo, actualización)`; claves que devuelve cada nodo):**
 
 | Nodo | Claves |
 |---|---|
@@ -185,6 +230,7 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 - `tests/tables.py`: `fake_settings(tables_dir, **overrides)` (dim 8, trazas apagadas), `valid_enrichment(df, **overrides)` (cumple BR-007), `sample_df()`, `sample_record(...)`.
 - `tests/unit/test_ingestion_graph.py::Harness(tmp_path, responses, store=None, **settings)`: deps de test + `events`/`nodes` del stream + `factory_calls`.
 - `tests/unit/test_tracing.py::FakeLangSmithClient` (`create_run`/`update_run`/`flush`) para probar trazas sin red.
+- `tests/unit/test_analyst_graph.py::Harness(tmp_path, responses, store=None, *, no_index=False, **settings)`: deps del Analista; `.index(record, df, with_parquet=True)` mete la tabla en el Pinecone fake (+ archivos); `ScriptedVectorStore(scripted)` devuelve `Match` guionados por consulta.
 
 ## Conventions & invariants
 
@@ -199,6 +245,7 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 - Trazas (D-022): run raíz `ingestion:<archivo>` con `run_id` propio; metadata final vía `RootMetadataTracer`; entradas/salidas saneadas (sin bytes ni DataFrames). Toda dataclass grande que entre al estado de un grafo debería tener `trace_summary()`.
 - Tests contra servicios reales: índice efímero `<PINECONE_INDEX_NAME>-itest-<6 hex>` borrado en `finally`, `TABLES_DIR` temporal (D-019); nunca escriben en producción. Las trazas de los tests sí van al proyecto real.
 - Encabezados (D-012), separador decimal por documento (D-008), unión multipágina (BR-001 + D-013/D-015), contexto (D-014): sin cambios.
+- **Analista (D-029..D-031):** nunca escribe en Pinecone (`open_index`, sin crear); una sola llamada de embeddings por pregunta; el LLM no decide el estado (BR-015, `decide_status` puro); la salida del LLM se normaliza en código (ids de partes, consultas, ids de tablas que no son candidatas, partes sin evaluar); una salida que no parsea degrada (plan de una parte / todo `missing`) con aviso, otros errores del proxy se propagan. Con `cannot_answer`, `results == []` siempre.
 - **Sandbox (D-026..D-028):** el código generado nunca lee archivos: usa `tables["tN"]` (alias `t1..tn` en el orden de las tablas elegidas), `pd` y `np` del preámbulo; nombres de columna exactos con `df["…"]`. El hijo corre `sys.executable -I -X utf8 <tmp>/main.py` con cwd `<tmp>/work/` (solo `tN.parquet`), entorno `PATH`+`SYSTEMROOT`+`SYSTEMDRIVE`+`TEMP`/`TMP` propios; al timeout se mata el árbol con `psutil` (en Windows el `python.exe` del venv es un lanzador). `static_check=False` solo en tests. No es una frontera de seguridad del SO (README final).
 
 ## Commands
@@ -211,6 +258,12 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 .venv\Scripts\ruff check .
 # tests del sandbox (sin red; lanza subprocesos reales, ~20–30 s)
 .venv\Scripts\python -m pytest tests/unit/test_sandbox.py -v
+# tests del Analista (sin red)
+.venv\Scripts\python -m pytest tests/unit/test_status.py tests/unit/test_analyst_graph.py -v
+# integración del Analista (LLM real + índice de producción en solo lectura; usar caché)
+$env:LLM_CACHE="true"; .venv\Scripts\python -m pytest -m integration tests/integration/test_analyst_real.py -v
+# preguntar desde la consola
+$env:LLM_CACHE="true"; .venv\Scripts\python -m agents.analyst "¿Cuál fue la tasa de desocupación del total de 31 aglomerados en el 2° trimestre de 2026?"
 # tests del grafo de ingesta (sin red)
 .venv\Scripts\python -m pytest tests/unit/test_ingestion_validate.py tests/unit/test_ingestion_graph.py -v
 # integración: ingesta real (LLM + Pinecone efímero + LangSmith, ~35 s; usar caché)
@@ -230,11 +283,12 @@ git ls-files .env
 
 ## Known gaps
 
-- Sandbox listo pero sin consumidor: el prompt de codegen y el nodo `execute` llegan en la Iteración 8 (texto sugerido para el prompt en `iterations/06-sandbox.md`). Límites conocidos del sandbox: sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store).
-- Analista (Iteraciones 7–8), UI (9: mostrar `IngestionResult`, FR-025 con vista previa vía `TableStore.load_table`, FR-004 al arrancar con `ensure_index`), evaluación (10). `run_url` de LangSmith: hoy solo `run_id`.
+- **STUB → Iteración 8:** `generate_code` y `execute` (`agents/analyst/nodes.py`) no llaman al LLM ni al sandbox: cada parte `covered` queda `missing` con "codegen no implementado" y la pregunta termina `cannot_answer`. Falta: prompt de codegen (texto sugerido en `iterations/06-sandbox.md`), `run_in_sandbox`, arista de reintento `execute → generate_code` (FR-037/038), VC-043/045/047/048/049/051/081 y NFR-006 completo. El sandbox (Iteración 6) sigue sin consumidor. Límites conocidos del sandbox: sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store).
+- UI (9: FR-056 (pregunta vacía o > 1 000 caracteres) no se valida en `ask`; mostrar `IngestionResult`, FR-025 con vista previa vía `TableStore.load_table`, FR-004 al arrancar con `ensure_index`), evaluación (10). `run_url` de LangSmith: hoy solo `run_id` (`AnalystResult.run_url` y `state.run_url` quedan `None`; FR-055).
 - `.env` tiene `LLM_CACHE=false`; para desarrollo exportar `LLM_CACHE=true` (el proceso gana sobre `.env`). El nombre de archivo va en el prompt de `enrich`: reingerir con otro nombre no usa la caché. `IngestionResult.llm_calls` cuenta invocaciones (incluidas las servidas por la caché).
 - Metadatos reales (revisados a mano, ver record 05): nombres a veces sin período (las dos EPH tienen "Principales tasas del mercado de trabajo"; el período está en la descripción, la sección y las columnas), abreviaturas ("ALC", "2T 2026"); columnas trimestrales de INDEC con mezcla de unidades por fila en el Cuadro 1.3 ("miles de personas o %"); filas de subtítulo de INDEC (`"Sexo y grupos de edad"`) aparecen en `row_headers`; CEPAL tiene notas pegadas a rótulos (`"Argentinab"`) y columnas `Country`/`Age` en inglés; tablas sin encabezado de primera columna quedan `col_0`/`col_4`.
 - Sección errónea en EPH 2T2025 p004 (resumen ejecutivo): "Dentro de la población ocupada (44,5%) se destacó que:" (bloque en negrita, D-014) y una fila sin rótulo.
 - NFR-008 (≤ 15 tablas, ≤ 5 min): medido 16 tablas en ~34 s; formal en la Iteración 10. NFR-001: solo probado en Python 3.13.
 - `find_tables` no detecta grillas de 1 columna; los cuadros de gráficos generan avisos de tablas descartadas (esperables, la UI los lista).
 - Si se mata un test de integración a mitad, puede quedar un índice `*-itest-*` en Pinecone (borrar a mano).
+- Analista: con preguntas sin relación igual hay candidatas (Pinecone siempre devuelve top-k; scores ~0,3–0,46 vs ~0,7 en preguntas relacionadas): el descarte lo hace el selector (FR-034), no un umbral. Sin tope de candidatas (con 33 tablas, ≤ ~15 por pregunta). La pregunta de VC-040 (2023) termina `cannot_answer` por período: los PDFs cubren 2T2024–2T2026.
