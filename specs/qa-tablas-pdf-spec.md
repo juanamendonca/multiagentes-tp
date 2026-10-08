@@ -2,9 +2,9 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.8 |
-| Última actualización | 2026-10-07 |
-| Estado | Draft |
+| Versión | 0.9 |
+| Última actualización | 2026-10-08 |
+| Estado | Implemented |
 | Owner | jmendoncag |
 | Fuente | `assignment.es.md` (TP Sistemas Multiagente de IA, 2026s2) |
 
@@ -343,6 +343,7 @@ Ninguna.
 
 ## 11. Changelog
 
+- 0.9 (2026-10-08): Estado → `Implemented`. Implementación completa en la rama `feat/qa-tablas` con `README.md` y `EVALUATION.md` finales; los diagramas Mermaid del README se verifican con `scripts/mermaid_graphs.py --check`. Quedan a cargo del usuario el link del video demo (FR-074) y los links públicos de las 3 trazas (FR-073), marcados `TODO(video)` / `TODO(trazas)`. Sin cambios de requisitos.
 - 0.8 (2026-10-07): BR-012 refleja el sandbox implementado: chequeo AST más estricto, `SYSTEMDRIVE`/`TMP` en el entorno, `io.open` no se bloquea (D-026, D-027).
 - 0.7 (2026-10-07): §7.4 corrige el tipo de `pages` en la metadata de Pinecone (list[str], restricción de Pinecone; D-018).
 - 0.6 (2026-10-07): BR-001 incorpora la excepción por epígrafe propio (D-015, ratificada por el usuario); VC-016 agrega ese caso.

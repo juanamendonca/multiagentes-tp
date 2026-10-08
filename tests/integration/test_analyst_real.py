@@ -100,6 +100,8 @@ SCALE_QUESTION = (
 DOC_2T2025 = "2c14158b26aed2d1"  # indec_eph_mercado_trabajo_2t2025.pdf
 DOC_2T2026 = "b0a700bac4db8192"  # indec_eph_mercado_trabajo_2t2026.pdf
 CUADRO_1_3_2T2026 = f"{DOC_2T2026}-p008-t0"
+# Tablas de la EPH 2T2026 con la tasa de desocupación del total de 31 aglomerados en 2T2025 y 2T2026.
+EQUIVALENT_TABLES_2T2026 = {f"{DOC_2T2026}-p005-t0", CUADRO_1_3_2T2026}
 TRACE_TIMEOUT_S = 120
 
 
@@ -138,12 +140,15 @@ def multitable(production: Settings, deps: AnalystDeps) -> AnalystResult:
 def test_single_table_question_is_answered_with_the_pdf_value(
     production: Settings, deps: AnalystDeps
 ) -> None:
-    """Given el Cuadro 1.3 de la EPH 2T2026 (pág. 8: tasa de desocupación 7,6 en 2T2025 y 7,9 en
-    2T2026), when se pregunta el valor y su cambio, then answered con 7,9 % y 0,3 p.p."""
+    """Given la EPH 2T2026, que trae la tasa de desocupación del total de 31 aglomerados (7,6 en
+    2T2025 y 7,9 en 2T2026) en dos tablas equivalentes (resumen de tasas, pág. 5, y Cuadro 1.3,
+    pág. 8), when se pregunta el valor y su cambio, then answered con 7,9 % y 0,3 p.p. usando
+    alguna de esas tablas."""
     result = run_analyst(SINGLE_TABLE_QUESTION, deps)
 
     assert result.status == "answered", result.missing
-    assert CUADRO_1_3_2T2026 in result.selection.selected_table_ids  # type: ignore[union-attr]
+    selected = set(result.selection.selected_table_ids)  # type: ignore[union-attr]
+    assert selected & EQUIVALENT_TABLES_2T2026, selected
     values = _values(result)
     assert _has(values, 7.9) and _has([abs(v) for v in values], 0.3, tol=1e-3)
     assert result.execution is not None and result.execution.ok

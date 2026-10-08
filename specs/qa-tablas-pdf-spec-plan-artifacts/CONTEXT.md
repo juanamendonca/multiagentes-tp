@@ -1,6 +1,6 @@
 # CONTEXT — estado actual del código
 
-Última actualización: Iteración 10 (set de evaluación y corrida). Rama de trabajo: `feat/qa-tablas`.
+Última actualización: Iteración 11 (final: documentación, entregables y verificación final). Rama de trabajo: `feat/qa-tablas`. **Sistema entregado**: todo el alcance de la spec v0.9 (`Implemented`) está implementado; lo único pendiente son pasos del usuario (link del video, links públicos de las 3 trazas, merge/push/SHA), ver `iterations/11-docs-final.md`.
 
 ## Current state
 
@@ -12,6 +12,8 @@
 - **Analista de punta a punta** (`agents/analyst/`): `StateGraph` `understand_query → retrieve → select_tables → generate_code → execute → decide_status → respond` con atajos `retrieve → decide_status` (sin candidatas, FR-032), `select_tables → decide_status` (ninguna parte `covered`, FR-034) y el ciclo `execute → generate_code` mientras la ejecución falle y queden intentos (FR-037, ≤ `1 + MAX_CODE_RETRIES`; al agotar, FR-038). Plan estructurado (FR-030), recuperación con 1 llamada de embeddings y dedupe por score máximo (D-029), descarte de candidatas sin Parquet (FR-042), selección con metadatos + `preview_csv` (D-030; puede combinar tablas, D-034), codegen con columnas exactas/dtypes/unidades/primera columna fila por fila/`df.head(5)` (FR-035, D-033), ejecución en el sandbox real con validación §7.6 (FR-036), feedback de error en reintentos (D-032), estado determinístico `decide_status` (BR-015) y respuesta en español con resultados, tablas + páginas, conversiones y explicación del cálculo (FR-040/041). Trazas `analyst:<60 chars>` con `status`, `selected_table_ids`, `code_attempts` y un span por cada `generate_code`/`execute` (VC-081, verificado en LangSmith real). CLI `python -m agents.analyst "<pregunta>"` (muestra también código y ejecución); interfaz `ask` / `run_analyst(..., on_update)`.
 - **UI Streamlit** (`app.py` + `ui/`): pestañas Subir PDF (ingesta con el nodo en curso y contadores en vivo, resumen FR-025 por tabla, avisos, `degraded`, FR-026/027/029), Explorar tablas (catálogo de `TABLES_DIR` por documento, tabla completa, conteo de vectores, borrado de documento con confirmación) y Preguntar (chat de sesión con badge de estado, valores, faltantes, tablas elegidas con datos, código, salida, reintentos y link a la traza de LangSmith). Config incompleta (FR-002), dimensión del índice (FR-004), errores de servicios (FR-054) y validación de preguntas (FR-056) manejados sin tracebacks. Verificada a mano contra producción (record 09, capturas en `screenshots/`).
 - **Evaluación** (`eval/`): 11 preguntas en `eval/questions.yaml` con estado y valores esperados calculados a mano desde el texto de los PDFs (FR-071) y runner `python -m eval.run_eval` (FR-072) que escribe `eval/results/latest.json` y la sección generada de `EVALUATION.md`. Dos corridas medidas con `LLM_CACHE=false` (record 10): 9/11 = 81,8 % en ambas (NFR-012 ≥ 75 % alcanzado), mediana 13,9 / 15,2 s y máximo 19,0 / 19,9 s (NFR-009), ≤ 5 / ≤ 4 llamadas de chat y 1 de embeddings por pregunta (NFR-006). Entre corridas, una ronda de ajuste del prompt de `understand_query` (D-040).
+- **Documentación final**: `README.md` (instalación y ejecución en PowerShell, uso de la app, arquitectura con los diagramas Mermaid de ambos grafos generados con `draw_mermaid()`, decisiones de diseño, PDFs de muestra con URL, evaluación, limitaciones/troubleshooting, video demo (`TODO(video)`), créditos) y `EVALUATION.md` (metodología, corridas, tabla generada entre marcadores, análisis de errores, NFRs medidos, 3 trazas representativas con `TODO(trazas)`, limitaciones). `scripts/mermaid_graphs.py --check` verifica que los diagramas del README coinciden con el código (D-042).
+- **Verificación final** (record 11): lint OK, 337 tests sin red OK (copia limpia con venv nuevo), 20 tests de integración OK con servicios reales, comandos del README ejecutados tal cual en PowerShell, diagramas idénticos a `draw_mermaid()`, chequeo de secretos vacío. Producción: índice `mas-2026s2-tables` con 33 vectores y 33 tablas en `data/tables/`.
 - Preguntas reales verificadas a mano (record 08): tasa de desocupación 31 aglomerados 2T2026 = 7,9 % y +0,3 p.p. vs 2T2025 (1 tabla); GBA 8,7 % (2T2025) → 8,2 % (2T2026), −0,5 p.p. (2 tablas, 2 PDFs); 1.164 miles = 1,164 millones de desocupados (conversión declarada).
 
 ## File map
@@ -23,7 +25,7 @@ ruff.toml / pytest.ini    lint (py311, 110 cols, E,F,I,UP,B) / tests (marker `in
 .gitignore                .env, .venv, caches, data/tables/, .langchain.db
 assignment.es.md          enunciado del TP
 notebooks/00_litellm_exploracion.ipynb   exploración del proxy (OQ-1); sin outputs
-specs/                    spec (v0.8), plan y este directorio de artefactos
+specs/                    spec (v0.9, Implemented), plan y este directorio de artefactos
 services/config.py        Settings, load_settings, ConfigError, REQUIRED_VARS
 services/llm.py           get_chat_model, get_embeddings, SQLiteCache (+ D-025), enable_cache_if_configured
 services/table_parsing.py flatten_header, parse_number, infer_decimal_separator, is_missing_marker,
@@ -65,6 +67,10 @@ agents/analyst/graph.py         build_analyst_graph, run_analyst, ask, initial_s
                                 result_from_state, NODE_NAMES, TRACE_PREFIX
 agents/analyst/__main__.py      CLI del Analista
 scripts/inspect_pdf.py    CLI de inspección de tablas extraídas (sin LLM ni red)
+scripts/mermaid_graphs.py draw_mermaid() de ambos grafos con deps de valores ficticios (sin red); --check compara con los bloques
+                          `<!-- mermaid:ingestion|analyst -->` de README.md (exit 1 si difieren), --write los reescribe (D-042)
+README.md / EVALUATION.md documentación final (sin referencias a spec/plan/artefactos/VCs)
+assets/                   3 capturas de la UI usadas por README.md (copias de screenshots/)
 data/sample_pdfs/         3 PDFs reales + SOURCES.md (versionados)
 data/tables/              Parquet + JSON de las tablas ingeridas (gitignored; hoy 33 tablas)
 tests/fakes.py            ScriptedChatModel, FakeEmbeddings, FakeVectorStore, FakePineconeClient, FakePineconeIndex
@@ -83,7 +89,8 @@ tests/integration/test_ingestion_real.py  VC-021, VC-027 (reingesta real), VC-08
 tests/unit/test_status.py              VC-050 (tabla de verdad de decide_status)
 tests/unit/test_analyst_graph.py       VC-041, 042, 044, 045, 047, 048 (grafo), 049, 052, 056, NFR-006, extract_code, traza (FakeSandbox;
                                        VC-045/047 con el sandbox real)
-tests/integration/test_analyst_real.py VC-040 (`-k plan`), sin relación → cannot_answer, 1 tabla (7,9 / 0,3), VC-043, VC-051, VC-081
+tests/integration/test_analyst_real.py VC-040 (`-k plan`), sin relación → cannot_answer, 1 tabla (7,9 / 0,3; acepta el resumen
+                          de tasas p005 o el Cuadro 1.3 p008 de la EPH 2T2026, que traen los mismos valores), VC-043, VC-051, VC-081
                                        (índice de producción, solo lectura)
 ```
 
@@ -104,8 +111,8 @@ eval/run_eval.py          Question, ExpectedValue, ExpectedTable, load_questions
                           write_results, rerender, main (CLI); marcadores START_MARKER / END_MARKER (D-039)
 eval/results/             latest.json (última corrida completa), run1.json / run2.json (corridas de la Iteración 10),
                           subset-<fecha>.json (re-corridas con --ids)
-EVALUATION.md             por ahora solo la sección generada entre <!-- EVAL:START --> y <!-- EVAL:END --> (la Iteración 11
-                          agrega metodología, análisis y trazas fuera de los marcadores)
+EVALUATION.md             informe final; la tabla de resultados es la sección generada entre <!-- EVAL:START --> y
+                          <!-- EVAL:END --> (el runner solo reescribe esa sección; el resto es texto a mano)
 tests/unit/test_questions_yaml.py  VC-091 (composición del set, causas de BR-014, PDFs existentes)
 tests/unit/test_run_eval.py        runner con `ask` fake: comparación, resumen/NFR, tabla en EVALUATION.md, --render
 tests/unit/test_ui_errors.py  VC-002 (AppTest de app.py sin PINECONE_API_KEY), VC-074, VC-076, VC-073 (AppTest de la pestaña
@@ -352,6 +359,8 @@ $env:LLM_CACHE="true"; Get-ChildItem data\sample_pdfs\*.pdf | ForEach-Object { .
 $env:LLM_CACHE="false"; .venv\Scripts\python -m eval.run_eval --tag runN
 # re-correr algunas preguntas (no toca EVALUATION.md; escribe eval/results/subset-<fecha>.json)
 $env:LLM_CACHE="false"; .venv\Scripts\python -m eval.run_eval --ids q05 q07
+# diagramas Mermaid: verificar README contra el código (o reescribirlos con --write)
+.venv\Scripts\python scripts\mermaid_graphs.py --check
 # reescribir la sección de EVALUATION.md desde resultados guardados (sin LLM)
 .venv\Scripts\python -m eval.run_eval --render eval/results/latest.json
 # tests del set y del runner (sin red)
@@ -364,8 +373,10 @@ git ls-files .env
 
 ## Known gaps
 
+Todas son limitaciones aceptadas y documentadas en `README.md` (sección *Limitaciones conocidas*) y/o `EVALUATION.md`; no queda ningún stub. Pendientes del usuario (no de código): `TODO(video)` en README, `TODO(trazas)` ×3 en EVALUATION, merge/push/SHA.
+
 - Límites conocidos del sandbox (D-026): sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store). Cada ejecución real cuesta ~1–8 s según la carga del equipo (arranque + `import pandas`).
-- Analista con datos reales (record 08): (1) la recuperación no siempre trae todas las tablas útiles (p. ej. "personas desocupadas en GBA 2T2026" no recupera `b0a700bac4db8192-p019-t0`, cuyo nombre es "Población de referencia por región"): esas preguntas terminan `cannot_answer` honesto; (2) el selector, tras D-034, a veces marca `covered` partes con un período que no está (p. ej. 2023): la segunda barrera es el código, que las reporta en `missing` con el motivo (resultado correcto, gasta 1 llamada de codegen y 1 ejecución); (3) el selector a veces agrega una tabla extra no usada por el código (aparece en "tablas usadas"). Medir en la Iteración 10.
+- Analista con datos reales (record 08): (1) la recuperación no siempre trae todas las tablas útiles (p. ej. "personas desocupadas en GBA 2T2026" no recupera `b0a700bac4db8192-p019-t0`, cuyo nombre es "Población de referencia por región"): esas preguntas terminan `cannot_answer` honesto; (2) el selector, tras D-034, a veces marca `covered` partes con un período que no está (p. ej. 2023): la segunda barrera es el código, que las reporta en `missing` con el motivo (resultado correcto, gasta 1 llamada de codegen y 1 ejecución); (3) el selector a veces agrega una tabla extra no usada por el código (aparece en "tablas usadas"). Medido en la evaluación (record 10, `EVALUATION.md`).
 - `AnalystResult.run_url` / `state.run_url` siguen `None` en los agentes: la URL la arman la UI y el eval con `RunUrlBuilder(settings)(result.run_id)`. FR-056 se valida en la UI (`validate_question`), no en `ask`.
 - **Fallas observadas en la evaluación (record 10):** (1) q05 (cantidad de desocupados de GBA en dos ediciones) no es estable: run 1 `cannot_answer` (no recuperó la tabla de 2T2026 p019), run 2 respuesta **incorrecta** (usó la fila del total de 31 aglomerados, 1.091/1.164, rotulada como GBA: el selector marcó `covered` una tabla sin la entidad y el código no lo frenó), re-corrida correcta (683/656/−27); (2) q07 (2T2024 y 2T2023) pasó de `partial` correcto (run 1) a `cannot_answer` (run 2 y re-corrida): tras D-040 el planificador junta los dos períodos en una sola parte; (3) la granularidad del plan decide `partial` vs `cannot_answer` (q08 run 1: el operando pedido implícitamente se volvió una parte). No se hicieron más rondas de ajuste (el plan permite una).
 - VC-054 no tiene un caso "pesos → USD": los PDFs no traen montos; se usa una conversión que requiere un dato externo (población mundial, q08). Tampoco hay un caso de unidad ambigua: todas las columnas usadas traen su unidad explícita (D-041).
@@ -375,5 +386,6 @@ git ls-files .env
 - Sección errónea en EPH 2T2025 p004 (resumen ejecutivo): "Dentro de la población ocupada (44,5%) se destacó que:" (bloque en negrita, D-014) y una fila sin rótulo.
 - NFR-008 (≤ 30 páginas y ≤ 15 tablas, ≤ 5 min): tiempos de la ingesta real del record 05 (33,7 / 19,8 / 11,9 s; la EPH 2T2026 tiene 16 tablas), reusados en la Iteración 10 sin reingerir (D-041). NFR-001: solo probado en Python 3.13.
 - `find_tables` no detecta grillas de 1 columna; los cuadros de gráficos generan avisos de tablas descartadas (esperables, la UI los lista).
+- NFR-011 (suite sin red ≤ 60 s): 53,0 s en el repo de trabajo y 28,7 / 27,8 s en una copia limpia ya "caliente"; la **primera** corrida en una copia limpia con venv recién creado tardó 80,8 s (carga en frío de las dependencias; record 11). Si se agregan tests lentos, la suite pasa el límite.
 - Si se mata un test de integración a mitad, puede quedar un índice `*-itest-*` en Pinecone (borrar a mano).
 - Analista: con preguntas sin relación igual hay candidatas (Pinecone siempre devuelve top-k; scores ~0,3–0,46 vs ~0,7 en preguntas relacionadas): el descarte lo hace el selector (FR-034), no un umbral. Sin tope de candidatas (con 33 tablas, ≤ ~15 por pregunta). La pregunta de VC-040 (2023) termina `cannot_answer` por período: los PDFs cubren 2T2024–2T2026.
