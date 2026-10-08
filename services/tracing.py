@@ -11,15 +11,20 @@
   cada span no sube megabytes de estado.
 - Con ``LANGSMITH_TRACING=false`` no hay tracer y la ejecución corre dentro de
   ``tracing_context(enabled=False)`` (no traza aunque el entorno del proceso diga lo contrario).
+- ``RunUrlBuilder`` arma el link a la traza de un run raíz a partir de su ``run_id`` (FR-055).
+  El link lleva ``?poll=true``: si la traza todavía no llegó a LangSmith, la página la espera.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import logging
 import uuid
+import warnings
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -31,6 +36,8 @@ from langsmith.run_helpers import tracing_context
 from pydantic import BaseModel
 
 from services.config import Settings
+
+logger = logging.getLogger(__name__)
 
 MAX_TRACE_DEPTH = 6
 MAX_TRACE_LIST = 50
@@ -184,3 +191,34 @@ def make_trace_setup(
     return TraceSetup(
         config=config, run_id=run_id, enabled=True, tracer=tracer, project_name=settings.langsmith_project
     )
+
+
+@dataclass
+class RunUrlBuilder:
+    """Construye la URL de LangSmith de un run raíz a partir de su ``run_id`` (FR-055).
+
+    La URL necesita el id del proyecto (``LANGSMITH_PROJECT``) y del tenant, que se piden una sola
+    vez a LangSmith y quedan en el cliente. Sin trazas, sin ``run_id`` o si LangSmith no responde,
+    ``__call__`` devuelve ``None`` (la UI muestra el ``run_id`` sin link) y nunca lanza.
+    """
+
+    settings: Settings
+    client: Any | None = None
+    _project_id: Any = field(default=None, init=False, repr=False)
+
+    def __call__(self, run_id: str | uuid.UUID | None) -> str | None:
+        if not run_id or not self.settings.langsmith_tracing:
+            return None
+        try:
+            run_uuid = uuid.UUID(str(run_id))
+            if self.client is None:
+                self.client = make_langsmith_client(self.settings)
+            if self._project_id is None:
+                self._project_id = self.client.read_project(project_name=self.settings.langsmith_project).id
+            run = SimpleNamespace(id=run_uuid, session_id=self._project_id, address=None)
+            with warnings.catch_warnings():  # get_run_url está deprecado (sigue hasta 2027)
+                warnings.simplefilter("ignore")
+                return str(self.client.get_run_url(run=run, project_id=self._project_id))
+        except Exception as exc:  # el link es opcional: nunca rompe la respuesta
+            logger.warning("no se pudo armar la URL de la traza %s: %s", run_id, type(exc).__name__)
+            return None

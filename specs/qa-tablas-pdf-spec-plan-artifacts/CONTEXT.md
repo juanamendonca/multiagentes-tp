@@ -1,16 +1,17 @@
 # CONTEXT — estado actual del código
 
-Última actualización: Iteración 8 (Analista: generación, ejecución y autocorrección de código). Rama de trabajo: `feat/qa-tablas`.
+Última actualización: Iteración 9 (UI Streamlit). Rama de trabajo: `feat/qa-tablas`.
 
 ## Current state
 
-- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (304 tests, sin red, ~44 s: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno y 2 tests del grafo Analista otros 3). `pytest -m integration` (20 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s) —estos dos usan un índice efímero propio (D-019)— y `test_analyst_real.py` (LLM real + sandbox; lee el índice de **producción** en solo lectura, ~55–70 s con caché).
+- El proyecto se instala con `requirements.txt` en `.venv` (Python 3.13) y pasa `ruff check .` y `pytest -m "not integration"` (323 tests, sin red, 43–51 s según la carga del equipo: los 61 del sandbox lanzan ~11 subprocesos reales de ~1–2,5 s cada uno, 2 tests del grafo Analista otros 3, y los 19 de la UI ~3 s con 2 `AppTest`). `pytest -m integration` (20 tests): `test_sample_pdfs.py` (sin red, ~10 s), `test_pinecone.py` (Pinecone + embeddings, ~90 s) `test_ingestion_real.py` (LLM + embeddings + Pinecone + LangSmith, ~35 s) —estos dos usan un índice efímero propio (D-019)— y `test_analyst_real.py` (LLM real + sandbox; lee el índice de **producción** en solo lectura, ~55–70 s con caché).
 - **Ingesta de punta a punta** (`agents/ingestion/`): `StateGraph` `load_pdf → extract_tables → collect_context → enrich ⇄ validate → (repair) → index` con reintentos por tabla (D-021), reparación BR-008, indexación idempotente (D-020/D-023) y trazas LangSmith `ingestion:<archivo>` con metadata final (D-022). CLI `python -m agents.ingestion <pdf>...`; interfaz `ingest_pdf` / `run_ingestion(..., on_update)`.
 - **Índice de producción `mas-2026s2-tables` creado y cargado**: 33 vectores = 33 tablas de los 3 PDFs de muestra (INDEC 2T2026: 16, INDEC 2T2025: 12, CEPAL: 5), todas `metadata_quality="ok"` al primer intento; `data/tables/` tiene sus 33 `.parquet` + 33 `.json` (gitignored). Inventario en `iterations/05-ingestion-graph.md`.
 - Servicios de base: `config`/`llm` (LiteLLM, caché SQLite que ahora sí funciona con salida estructurada, D-025), `table_parsing`, `pdf_extract`, `pdf_context`, `table_store`, `vectorstore`, `tracing`.
 - **Sandbox de ejecución** (`services/sandbox.py`, independiente de los agentes): chequeo AST, subproceso `python -I -X utf8` con cwd temporal que solo tiene los Parquet seleccionados (`t1.parquet`…), entorno mínimo, preámbulo que carga `tables` y después bloquea `open`/sockets, timeout con muerte del árbol de procesos y salida acotada; `parse_result_line` valida el contrato §7.6 (D-026..D-028). Probado también a mano con un Parquet real de INDEC.
 - **Analista de punta a punta** (`agents/analyst/`): `StateGraph` `understand_query → retrieve → select_tables → generate_code → execute → decide_status → respond` con atajos `retrieve → decide_status` (sin candidatas, FR-032), `select_tables → decide_status` (ninguna parte `covered`, FR-034) y el ciclo `execute → generate_code` mientras la ejecución falle y queden intentos (FR-037, ≤ `1 + MAX_CODE_RETRIES`; al agotar, FR-038). Plan estructurado (FR-030), recuperación con 1 llamada de embeddings y dedupe por score máximo (D-029), descarte de candidatas sin Parquet (FR-042), selección con metadatos + `preview_csv` (D-030; puede combinar tablas, D-034), codegen con columnas exactas/dtypes/unidades/primera columna fila por fila/`df.head(5)` (FR-035, D-033), ejecución en el sandbox real con validación §7.6 (FR-036), feedback de error en reintentos (D-032), estado determinístico `decide_status` (BR-015) y respuesta en español con resultados, tablas + páginas, conversiones y explicación del cálculo (FR-040/041). Trazas `analyst:<60 chars>` con `status`, `selected_table_ids`, `code_attempts` y un span por cada `generate_code`/`execute` (VC-081, verificado en LangSmith real). CLI `python -m agents.analyst "<pregunta>"` (muestra también código y ejecución); interfaz `ask` / `run_analyst(..., on_update)`.
-- Preguntas reales verificadas a mano (record 08): tasa de desocupación 31 aglomerados 2T2026 = 7,9 % y +0,3 p.p. vs 2T2025 (1 tabla); GBA 8,7 % (2T2025) → 8,2 % (2T2026), −0,5 p.p. (2 tablas, 2 PDFs); 1.164 miles = 1,164 millones de desocupados (conversión declarada). Todavía no hay UI.
+- **UI Streamlit** (`app.py` + `ui/`): pestañas Subir PDF (ingesta con el nodo en curso y contadores en vivo, resumen FR-025 por tabla, avisos, `degraded`, FR-026/027/029), Explorar tablas (catálogo de `TABLES_DIR` por documento, tabla completa, conteo de vectores, borrado de documento con confirmación) y Preguntar (chat de sesión con badge de estado, valores, faltantes, tablas elegidas con datos, código, salida, reintentos y link a la traza de LangSmith). Config incompleta (FR-002), dimensión del índice (FR-004), errores de servicios (FR-054) y validación de preguntas (FR-056) manejados sin tracebacks. Verificada a mano contra producción (record 09, capturas en `screenshots/`).
+- Preguntas reales verificadas a mano (record 08): tasa de desocupación 31 aglomerados 2T2026 = 7,9 % y +0,3 p.p. vs 2T2025 (1 tabla); GBA 8,7 % (2T2025) → 8,2 % (2T2026), −0,5 p.p. (2 tablas, 2 PDFs); 1.164 miles = 1,164 millones de desocupados (conversión declarada).
 
 ## File map
 
@@ -85,7 +86,23 @@ tests/integration/test_analyst_real.py VC-040 (`-k plan`), sin relación → can
                                        (índice de producción, solo lectura)
 ```
 
-Layout futuro fijado por el plan: `app.py`, `ui/`, `eval/`.
+app.py                    Streamlit: arma la página (header con errores de config/índice, 3 pestañas) — sin lógica propia
+ui/setup.py               AppContext, IndexCheck, build_app_context, load_app_settings, check_index, tables_dir_from_env,
+                          make_ingestion_runner, make_analyst_runner (D-035)
+ui/errors.py              run_safely, describe_error, service_of, summarize_error, redact, SERVICE_BY_MODULE/TYPE (D-037)
+ui/render.py              render_record (FR-025), lazy_expander (D-038), status_badge, quality_badge, columns_frame,
+                          load_table_or_none, source_text
+ui/upload.py              render_upload_tab, ingest_files, IngestionProgress (líneas por evento de stream), render_result,
+                          result_message, warnings_frame
+ui/explore.py             render_explore_tab, group_by_document, Document, delete_document, DeleteOutcome, count_document_vectors
+ui/ask.py                 render_ask_tab, submit_question, validate_question (FR-056), ChatTurn, describe_update, render_answer,
+                          results_frame, format_value, MAX_QUESTION_CHARS=1000, HISTORY_KEY="chat_history"
+tests/unit/test_ui_errors.py  VC-002 (AppTest de app.py sin PINECONE_API_KEY), VC-074, VC-076, VC-073 (AppTest de la pestaña
+                          Preguntar con Analista fake), progreso de ingesta, borrado, check_index, RunUrlBuilder
+.claude/launch.json       config `streamlit` para la vista previa (puerto 8501, LLM_CACHE=true, sin estadísticas de uso)
+specs/…-artifacts/screenshots/  capturas de la verificación manual (lista en record 09 y screenshots/README.md)
+
+Layout futuro fijado por el plan: `eval/`.
 
 ## Public interfaces
 
@@ -142,6 +159,7 @@ def make_trace_setup(settings, *, run_name, metadata=None, tags=None, root_metad
     flush()                        # espera el envío (llamar al terminar)
 class RootMetadataTracer(LangChainTracer): (root_metadata: Callable[[Mapping], Mapping]) — agrega metadata al run raíz al cerrar
 def sanitize_for_trace(value) -> Any; def make_langsmith_client(settings) -> langsmith.Client (hide_inputs/outputs)
+@dataclass class RunUrlBuilder(settings, client=None): __call__(run_id) -> str | None   # FR-055, D-036; nunca lanza
 ```
 
 ```python
@@ -243,6 +261,21 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 - `tests/unit/test_tracing.py::FakeLangSmithClient` (`create_run`/`update_run`/`flush`) para probar trazas sin red.
 - `tests/unit/test_analyst_graph.py::Harness(tmp_path, responses, store=None, *, no_index=False, **settings)`: deps del Analista; `.index(record, df, with_parquet=True)` mete la tabla en el Pinecone fake (+ archivos); `ScriptedVectorStore(scripted)` devuelve `Match` guionados por consulta.
 
+```python
+# ui/  (Iteración 9; D-035..D-038). Runners inyectables: la UI no conoce los grafos.
+IngestionRunner = Callable[[file_name, pdf_bytes, on_update], IngestionResult]   # make_ingestion_runner(settings)
+AnalystRunner = Callable[[question, on_update], AnalystResult]                     # make_analyst_runner(settings)
+def run_safely(service_name, fn, *args, on_error=None, **kwargs) -> T | None      # st.error("<servicio>: <msg>"), no propaga
+def validate_question(text) -> str | None                                         # aviso o None (strip; 1..1000 caracteres)
+def submit_question(raw, history: list[ChatTurn], runner, *, on_update=None, run_url=None) -> ChatTurn | None
+def delete_document(doc_hash, *, table_store, vector_store, wait_s=20) -> DeleteOutcome   # vectores → archivos; remaining_vectors
+def check_index(settings, opener=open_index) -> IndexCheck(error, note, blocking)
+render_upload_tab(runner|None, table_store, disabled_reason); render_explore_tab(table_store, provider|None);
+render_ask_tab(runner|None, table_store, disabled_reason, run_url=None)
+```
+
+Claves de `st.session_state`: `chat_history` (list[ChatTurn]), `ingestion_results` (list[(IngestionResult, líneas)]), `index_check`, `run_url_builder`, `explore_confirm_delete`, `explore_notice`, `explore_vector_counts`.
+
 ## Conventions & invariants
 
 - `ChatOpenAI(`/`OpenAIEmbeddings(` solo en `services/llm.py` (VC-001). Toda la config entra por `load_settings()`; nunca loguear `*_api_key`.
@@ -257,11 +290,16 @@ CLI: `.venv\Scripts\python -m agents.ingestion <pdf> [<pdf> ...] [--as-name NOMB
 - Tests contra servicios reales: índice efímero `<PINECONE_INDEX_NAME>-itest-<6 hex>` borrado en `finally`, `TABLES_DIR` temporal (D-019); nunca escriben en producción. Las trazas de los tests sí van al proyecto real.
 - Encabezados (D-012), separador decimal por documento (D-008), unión multipágina (BR-001 + D-013/D-015), contexto (D-014): sin cambios.
 - **Analista (D-029..D-034):** el codegen recibe solo las tablas elegidas por alias y nunca rutas; el sandbox (inyectable en `AnalystDeps.sandbox`) valida §7.6 contra las partes `covered`; ≤ `1 + MAX_CODE_RETRIES` llamadas de codegen (NFR-006: ≤ `4 + MAX_CODE_RETRIES` de chat por pregunta). Tests `[U]` usan `FakeSandbox` salvo 2 (sandbox real, ~1–2 s por ejecución). Nunca escribe en Pinecone (`open_index`, sin crear); una sola llamada de embeddings por pregunta; el LLM no decide el estado (BR-015, `decide_status` puro); la salida del LLM se normaliza en código (ids de partes, consultas, ids de tablas que no son candidatas, partes sin evaluar); una salida que no parsea degrada (plan de una parte / todo `missing`) con aviso, otros errores del proxy se propagan. Con `cannot_answer`, `results == []` siempre.
+- **UI (D-035..D-038):** `app.py` no tiene lógica; todo lo testeable está en `ui/` con runners/stores inyectables. Toda acción que toca servicios pasa por `run_safely` (nunca tracebacks en pantalla; claves redactadas). Las preguntas se validan antes de llamar al Analista. Los datos de tablas van en `lazy_expander` (solo se renderizan abiertos). El borrado de un documento borra primero los vectores (prefijo `doc_hash[:16]-`) y después los archivos; si Pinecone falla no toca los archivos. Tests de UI: pocos `AppTest` (~0,5–1,5 s cada uno), el resto con `st.error`/`st.warning` reemplazados por grabadoras.
 - **Sandbox (D-026..D-028):** el código generado nunca lee archivos: usa `tables["tN"]` (alias `t1..tn` en el orden de las tablas elegidas), `pd` y `np` del preámbulo; nombres de columna exactos con `df["…"]`. El hijo corre `sys.executable -I -X utf8 <tmp>/main.py` con cwd `<tmp>/work/` (solo `tN.parquet`), entorno `PATH`+`SYSTEMROOT`+`SYSTEMDRIVE`+`TEMP`/`TMP` propios; al timeout se mata el árbol con `psutil` (en Windows el `python.exe` del venv es un lanzador). `static_check=False` solo en tests. No es una frontera de seguridad del SO (README final).
 
 ## Commands
 
 ```powershell
+# levantar la app (http://localhost:8501); LLM_CACHE=true para desarrollo
+$env:LLM_CACHE="true"; .venv\Scripts\streamlit run app.py
+# tests de la UI (sin red)
+.venv\Scripts\python -m pytest tests/unit/test_ui_errors.py -v
 # instalar / actualizar dependencias
 .venv\Scripts\python -m pip install -r requirements.txt
 # tests unitarios (sin red) y lint
@@ -296,7 +334,8 @@ git ls-files .env
 
 - Límites conocidos del sandbox (D-026): sin tope de memoria/CPU salvo el timeout; listas de bloqueo del AST incompletas; pyarrow lee/escribe sin pasar por `open` (solo lo frena el AST); NFR-001 solo probado en Windows + Python 3.13 (Store). Cada ejecución real cuesta ~1–8 s según la carga del equipo (arranque + `import pandas`).
 - Analista con datos reales (record 08): (1) la recuperación no siempre trae todas las tablas útiles (p. ej. "personas desocupadas en GBA 2T2026" no recupera `b0a700bac4db8192-p019-t0`, cuyo nombre es "Población de referencia por región"): esas preguntas terminan `cannot_answer` honesto; (2) el selector, tras D-034, a veces marca `covered` partes con un período que no está (p. ej. 2023): la segunda barrera es el código, que las reporta en `missing` con el motivo (resultado correcto, gasta 1 llamada de codegen y 1 ejecución); (3) el selector a veces agrega una tabla extra no usada por el código (aparece en "tablas usadas"). Medir en la Iteración 10.
-- UI (9: FR-056 (pregunta vacía o > 1 000 caracteres) no se valida en `ask`; mostrar `IngestionResult`, FR-025 con vista previa vía `TableStore.load_table`, FR-004 al arrancar con `ensure_index`), evaluación (10). `run_url` de LangSmith: hoy solo `run_id` (`AnalystResult.run_url` y `state.run_url` quedan `None`; FR-055 → Iteración 9, p. ej. `langsmith.Client().get_run_url(run=..., project_name=...)` o la URL del proyecto + `run_id`).
+- Evaluación (Iteración 10). `AnalystResult.run_url` / `state.run_url` siguen `None` en los agentes: la URL la arma la UI con `RunUrlBuilder(settings)(result.run_id)` (reusable en el eval). FR-056 se valida en la UI (`validate_question`), no en `ask`.
+- UI (record 09): la subida de archivos por arrastrar y soltar no se probó con el mouse (la automatización cargó el archivo en el `<input type=file>`); el link de la traza se verificó por API, abrirlo requiere sesión en LangSmith. `st.dataframe` muestra `NaN` como "None". Cada abrir/cerrar de una tabla en Explorar hace un rerun; Explorar no muestra vectores huérfanos (documentos en Pinecone sin `*.json`). El conteo total de vectores se refresca con el botón (eventual consistency de Pinecone).
 - `.env` tiene `LLM_CACHE=false`; para desarrollo exportar `LLM_CACHE=true` (el proceso gana sobre `.env`). El nombre de archivo va en el prompt de `enrich`: reingerir con otro nombre no usa la caché. `IngestionResult.llm_calls` cuenta invocaciones (incluidas las servidas por la caché).
 - Metadatos reales (revisados a mano, ver record 05): nombres a veces sin período (las dos EPH tienen "Principales tasas del mercado de trabajo"; el período está en la descripción, la sección y las columnas), abreviaturas ("ALC", "2T 2026"); columnas trimestrales de INDEC con mezcla de unidades por fila en el Cuadro 1.3 ("miles de personas o %"); filas de subtítulo de INDEC (`"Sexo y grupos de edad"`) aparecen en `row_headers`; CEPAL tiene notas pegadas a rótulos (`"Argentinab"`) y columnas `Country`/`Age` en inglés; tablas sin encabezado de primera columna quedan `col_0`/`col_4`.
 - Sección errónea en EPH 2T2025 p004 (resumen ejecutivo): "Dentro de la población ocupada (44,5%) se destacó que:" (bloque en negrita, D-014) y una fila sin rótulo.
