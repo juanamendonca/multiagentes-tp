@@ -164,8 +164,8 @@ evaluación; no se reingirió durante las corridas de preguntas para no cambiar 
 
 ## Trazas representativas
 
-Las tres trazas están en el proyecto de LangSmith del autor. Los links de abajo abren la traza con
-sesión en esa cuenta; se reemplazan por los links públicos compartidos.
+Las tres trazas están compartidas públicamente desde el proyecto de LangSmith del autor: los links
+de abajo se abren sin iniciar sesión.
 
 1. **Ingesta** — `ingestion:indec_eph_mercado_trabajo_2t2026.pdf`
    (run `5ff8d853-72a8-43bd-a8eb-c96115929217`). Muestra el run raíz con un span por nodo
@@ -173,8 +173,7 @@ sesión en esa cuenta; se reemplazan por los links públicos compartidos.
    `doc_hash`, `n_tables=16`, `n_warnings`, `n_indexed`, `llm_calls`, y las 16 llamadas de
    enriquecimiento en paralelo con salida estructurada. Ninguna tabla de la ingesta real necesitó
    reintento de validación.
-   [Ver traza](https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/5ff8d853-72a8-43bd-a8eb-c96115929217?poll=true)
-   — **TODO(trazas): reemplazar por links públicos**
+   [Ver traza (link público)](https://smith.langchain.com/public/367af2c4-b7d8-4758-ac52-fa24b2c0ebf7/r/5ff8d853-72a8-43bd-a8eb-c96115929217?start_time=2026-10-07T20%3A00%3A07.157478Z)
 2. **Respuesta `answered` multitabla** — q04, corrida 2 (run `fe3e594b-53e3-4aef-aff1-cce7bc88439f`):
    la tasa de desocupación de Argentina en 2024 según CEPAL (7,2 %), la del total de 31 aglomerados
    del 2T2025 según INDEC (7,6 %) y su diferencia (0,4 p.p.). Muestra el plan en 3 partes, la
@@ -182,15 +181,13 @@ sesión en esa cuenta; se reemplazan por los links públicos compartidos.
    `t2`), el código generado, la ejecución en el sandbox y la metadata `status=answered`,
    `selected_table_ids`, `code_attempts=1`. No hubo respuestas multitabla `answered` con reintento de
    código en las corridas.
-   [Ver traza](https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/fe3e594b-53e3-4aef-aff1-cce7bc88439f?poll=true)
-   — **TODO(trazas): reemplazar por links públicos**
+   [Ver traza (link público)](https://smith.langchain.com/public/39f081b5-2548-4d49-8adc-4481941cecaa/r/fe3e594b-53e3-4aef-aff1-cce7bc88439f?start_time=2026-10-08T02%3A01%3A08.943283Z)
 3. **Respuesta `partial`** — q09, corrida 2 (run `27143e71-94b8-4cb3-ae89-0ab8b5f21d3e`): se calcula
    la tasa de Colombia en 2024 (10,2 %), pero la comparación con "el promedio de los países del
    Caribe" queda como faltante porque ese agregado no está en la tabla (no se lo inventa promediando
    países). Muestra la cobertura por parte en la selección, el JSON del código con `results` y
    `missing`, y `decide_status` resolviendo `partial`.
-   [Ver traza](https://smith.langchain.com/o/5e77de68-d657-4492-92a7-0c1085d69b26/projects/p/3a42a222-5725-4e62-92b0-09000d335246/r/27143e71-94b8-4cb3-ae89-0ab8b5f21d3e?poll=true)
-   — **TODO(trazas): reemplazar por links públicos**
+   [Ver traza (link público)](https://smith.langchain.com/public/aa7af97d-e4c6-4385-b3de-d3f9d55e6d89/r/27143e71-94b8-4cb3-ae89-0ab8b5f21d3e?start_time=2026-10-08T02%3A02%3A20.076217Z)
 
 Los links a la traza de cada pregunta de la corrida 2 están en la última columna de la tabla de
 resultados.
