@@ -346,7 +346,11 @@ reemplazan por resúmenes (tamaño, forma y columnas).
 datos de los PDFs de muestra. Lo que no resolvía bien eran los encabezados: INDEC los dibuja aparte
 de la grilla y CEPAL usa 4 niveles con celdas combinadas, así que el encabezado se reconstruye a
 partir de las palabras y las rayas de la página y se aplana en una sola fila (`"2023 - Ene"`),
-con nombres únicos y estables, que es lo que necesita el código generado. Las heurísticas usan
+con nombres únicos y estables, que es lo que necesita el código generado. Los cuadros "cebra" sin
+rayas verticales (filas de fondo gris alternado, como en los informes de pobreza del INDEC) también
+se reparan: `find_tables` solo arma celdas en las filas grises, así que las filas blancas se
+rearman con las palabras de la página y los límites de columna de las filas bien detectadas, y un
+encabezado escrito solo sobre la columna de valores ("1º semestre de 2026*") se acepta. Las heurísticas usan
 umbrales en puntos; un PDF con otro diseño puede pedir ajustarlos (`scripts/inspect_pdf.py` muestra
 lo que se extrae).
 

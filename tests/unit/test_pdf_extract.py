@@ -151,6 +151,35 @@ def test_header_written_as_loose_text_with_spanning_label() -> None:
     assert all("Cuadro" not in name for name in tables[0].header)
 
 
+def test_zebra_table_without_vertical_rules_keeps_white_rows_and_columns() -> None:
+    """Given un cuadro sin rayas verticales con filas de fondo gris alternado (``find_tables``
+    solo arma celdas en las grises), una columna de unidad a veces vacía y el encabezado
+    "1º semestre de 2026*" escrito solo sobre la columna de valores, when se extrae, then
+    queda una tabla con las 7 filas, cada valor en su columna y el encabezado (D-044)."""
+    tables, warnings = extract(make_pdfs.zebra_table())
+
+    assert warnings == []
+    assert len(tables) == 1
+    df = tables[0].df
+    assert tables[0].header == ["col_0", "col_1", "1º semestre de 2026*"]
+    assert df["col_0"].tolist() == [label for label, _, _ in make_pdfs.ZEBRA_ROWS]
+    assert df["1º semestre de 2026*"].tolist() == [24.4, 3.89, 3.15, 1440395.0, 922755.0, -517640.0, 35.9]
+    assert df["col_1"].fillna("").tolist() == ["%", "", "", "$", "$", "$", "%"]
+
+
+def test_zebra_table_ending_on_white_row_keeps_last_row_but_not_the_source_note() -> None:
+    """Given el mismo cuadro con una última fila sin fondo, when se extrae, then esa fila se
+    conserva y la nota "Fuente: ..." de abajo no se agrega como fila (D-044)."""
+    tables, _ = extract(make_pdfs.zebra_table(ends_on_white_row=True))
+
+    assert len(tables) == 1
+    df = tables[0].df
+    assert len(df) == 8
+    assert df.iloc[-1].tolist()[0] == "Hogares pobres (en miles)"
+    assert df.iloc[-1].tolist()[2] == 2498.0
+    assert not df["col_0"].str.contains("Fuente").any()
+
+
 # --- VC-017 (FR-015) -----------------------------------------------------------------------------
 
 

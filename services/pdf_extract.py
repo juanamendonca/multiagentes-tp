@@ -60,6 +60,12 @@ RULE_FULL_WIDTH = 0.95  # rayas casi del ancho de la tabla son bordes, no agrupa
 RULE_CENTRE_TOLERANCE = 0.15  # un rótulo agrupador está centrado sobre su raya
 EXTERNAL_HEADER_MAX_GAP = 22.0  # encabezado escrito como texto suelto sobre la tabla
 EXTERNAL_HEADER_LINE_GAP = 9.0  # separación máxima entre líneas de ese encabezado
+# D-044: tablas sin rayas verticales con filas de fondo alternado ("cebra"). ``find_tables``
+# solo arma celdas en las filas sombreadas: las blancas llegan como una celda de todo el
+# ancho o como huecos entre tablas de una fila. Se reconstruyen con las palabras.
+STACK_MAX_GAP = 20.0  # hueco máximo (≈ una fila blanca) entre fragmentos apilados
+STACK_MIN_OVERLAP = 0.9  # solapamiento horizontal mínimo entre fragmentos apilados
+LINE_Y_TOLERANCE = 3.0  # palabras de una misma línea de texto (centro vertical)
 # D-014: franjas superior e inferior de la página (encabezados/pies de página repetidos).
 PAGE_MARGIN_FRACTION = 0.05
 # D-015: epígrafe que abre una tabla nueva ("Cuadro 2.3", "Gráfico 4", "1.1.4 Población...").
@@ -181,6 +187,30 @@ class _Fragment:
     n_cols: int
 
 
+@dataclass
+class _ViewRow:
+    bbox: BBox
+    cells: list[BBox | None]
+    texts: Row
+
+
+@dataclass
+class _TableView:
+    """Copia editable de una tabla de ``find_tables`` (bbox, filas con celdas y textos), para
+    poder unir fragmentos apilados y rearmar filas mal partidas (D-044)."""
+
+    bbox: BBox
+    col_count: int
+    rows: list[_ViewRow]
+
+    @property
+    def row_count(self) -> int:
+        return len(self.rows)
+
+    def extract(self) -> list[Row]:
+        return [list(r.texts) for r in self.rows]
+
+
 @dataclass(frozen=True)
 class _Phrase:
     x0: float
@@ -235,9 +265,7 @@ def _read_page(page: pymupdf.Page, sizes: list[tuple[float, int]]) -> PageText:
             continue
         x0, y0, x1, y1 = block["bbox"]
         blocks.append(
-            TextBlock(
-                bbox=(x0, y0, x1, y1), text=text, font_size=max(block_sizes), bold=bold_chars == chars
-            )
+            TextBlock(bbox=(x0, y0, x1, y1), text=text, font_size=max(block_sizes), bold=bold_chars == chars)
         )
 
     page_area = page.rect.width * page.rect.height
@@ -322,10 +350,11 @@ def _is_empty_row(row: Sequence[object]) -> bool:
 
 
 def _count_header_rows(rows: Sequence[Sequence[object]]) -> int:
-    """Filas iniciales de encabezado (D-012): 0 si la primera fila es de datos (BR-001 d);
-    si no, la primera fila más las siguientes que tienen vacía la primera celda (rótulo de
-    fila) y ningún número que no sea un año; 1 si la tabla no tiene números."""
-    if not rows or _is_numeric_row(rows[0]):
+    """Filas iniciales de encabezado (D-012): 0 si la primera fila es de datos (BR-001 d, o
+    un rótulo seguido de algún número que no es un año, p. ej. "Incidencia | % | 24,4",
+    D-044); si no, la primera fila más las siguientes que tienen vacía la primera celda
+    (rótulo de fila) y ningún número que no sea un año; 1 si la tabla no tiene números."""
+    if not rows or _is_numeric_row(rows[0]) or any(_is_data_number(c) for c in rows[0][1:]):
         return 0
     n = 1
     for row in rows[1:MAX_HEADER_ROWS]:
@@ -367,8 +396,10 @@ def _horizontal_rules(page: pymupdf.Page) -> list[tuple[float, float, float]]:
 
 
 def _column_bounds(table: Any, first_body_row: int) -> list[tuple[float, float]]:
-    """Límites horizontales de cada columna, tomados de las celdas del cuerpo."""
+    """Límites horizontales de cada columna, tomados de las celdas del cuerpo (de las filas
+    con todas sus celdas, si hay: las filas con una celda de todo el ancho no cuentan, D-044)."""
     rows = table.rows[first_body_row:] or table.rows
+    rows = [r for r in rows if all(c is not None for c in r.cells)] or rows
     bounds: list[tuple[float, float] | None] = []
     for j in range(table.col_count):
         cells = [r.cells[j] for r in rows if j < len(r.cells) and r.cells[j] is not None]
@@ -539,13 +570,156 @@ def _is_header_fragment(upper: Any, lower: Any) -> bool:
     return not any(_is_data_number(c) for row in upper.extract() for c in row)
 
 
+def _view(table: Any) -> _TableView:
+    texts = table.extract()
+    rows = [_ViewRow(tuple(r.bbox), list(r.cells), list(t)) for r, t in zip(table.rows, texts, strict=True)]
+    return _TableView(tuple(table.bbox), table.col_count, rows)
+
+
+def _has_data_numbers(view: _TableView) -> bool:
+    return any(_is_data_number(c) for row in view.extract() for c in row)
+
+
+def _row_from_words(words: Sequence[tuple], band: BBox, columns: list[tuple[float, float]]) -> Row | None:
+    """D-044: arma una fila con las frases de la franja, cada una en la columna que contiene
+    su centro (o la más cercana). ``None`` si ninguna línea tiene más de una frase (subtítulo,
+    nota al pie de varias líneas, rótulo sin valores): no hay columnas que separar."""
+    phrases = sorted(_phrases(words, band), key=lambda p: (round(p.y0), p.x0))
+    lines: list[list[_Phrase]] = []
+    for p in phrases:
+        if lines and abs((p.y0 + p.y1) / 2 - (lines[-1][0].y0 + lines[-1][0].y1) / 2) <= LINE_Y_TOLERANCE:
+            lines[-1].append(p)
+        else:
+            lines.append([p])
+    if all(len(line) <= 1 for line in lines):
+        return None
+    texts: Row = [None] * len(columns)
+    for p in phrases:
+        cx = (p.x0 + p.x1) / 2
+        j = next(
+            (j for j, (a, b) in enumerate(columns) if a <= cx <= b),
+            min(range(len(columns)), key=lambda k: abs((columns[k][0] + columns[k][1]) / 2 - cx)),
+        )
+        texts[j] = p.text if texts[j] is None else f"{texts[j]} {p.text}"
+    return texts
+
+
+def _text_lines(words: Sequence[tuple], x0: float, y0: float, x1: float, y1: float) -> list[BBox]:
+    """Franjas (bbox) de las líneas de texto con centro dentro del rectángulo."""
+    centres = sorted(
+        (w[1] + w[3]) / 2
+        for w in words
+        if y0 < (w[1] + w[3]) / 2 < y1 and x0 - 2 <= (w[0] + w[2]) / 2 <= x1 + 2
+    )
+    lines: list[list[float]] = []
+    for cy in centres:
+        if lines and cy - lines[-1][-1] <= LINE_Y_TOLERANCE:
+            lines[-1].append(cy)
+        else:
+            lines.append([cy])
+    return [(x0, line[0] - LINE_Y_TOLERANCE, x1, line[-1] + LINE_Y_TOLERANCE) for line in lines]
+
+
+def _stacks(upper: _TableView, lower: _TableView, words: Sequence[tuple], rules: list) -> bool:
+    """D-044: ``lower`` es la continuación en la misma página de ``upper``, separadas solo por
+    filas blancas (texto en el hueco, sin rayas ni epígrafes): misma cantidad de columnas,
+    mismo ancho y ambas con datos."""
+    ux0, _, ux1, uy1 = upper.bbox
+    lx0, ly0, lx1, _ = lower.bbox
+    if upper.col_count != lower.col_count or not 0 <= ly0 - uy1 <= STACK_MAX_GAP:
+        return False
+    if _overlap(ux0, ux1, lx0, lx1) < STACK_MIN_OVERLAP * max(ux1 - ux0, lx1 - lx0):
+        return False
+    if not (_has_data_numbers(upper) and _has_data_numbers(lower)):
+        return False
+    width = ux1 - ux0
+    if any(uy1 + 1 < y < ly0 - 1 and _overlap(rx0, rx1, ux0, ux1) > 0.5 * width for rx0, rx1, y in rules):
+        return False
+    gap = _text_lines(words, ux0, uy1, ux1, ly0)
+    if not gap:
+        return False
+    return not any(CAPTION_RE.match(" ".join(p.text for p in _phrases(words, band))) for band in gap)
+
+
+def _extend_trailing_rows(
+    view: _TableView, words: Sequence[tuple], rules: list, columns: list[tuple[float, float]], limit: float
+) -> None:
+    """D-044: agrega las filas blancas que siguen a la última fila sombreada (la tabla termina
+    en una fila sin fondo): líneas pegadas debajo, sin raya en el medio, con frases en más de
+    una columna, un rótulo de texto en la primera y algún número en las demás. Corta en la
+    primera línea que no cumple (nota, "Fuente: …", marcas de eje de un gráfico)."""
+    if view.row_count < 2:
+        return
+    x0, _, x1, _ = view.bbox
+    width = x1 - x0
+    while True:
+        bottom = view.bbox[3]
+        lines = _text_lines(words, x0, bottom, x1, min(bottom + STACK_MAX_GAP, limit))
+        if not lines:
+            return
+        band = lines[0]
+        if band[1] + LINE_Y_TOLERANCE - bottom > STACK_MAX_GAP:
+            return
+        if any(
+            bottom - 1 < y < band[1] + 1 and _overlap(rx0, rx1, x0, x1) > 0.5 * width for rx0, rx1, y in rules
+        ):
+            return
+        texts = _row_from_words(words, band, columns)
+        if texts is None or not any(_is_data_number(c) for c in texts[1:]):
+            return
+        label = clean_text(texts[0])
+        if not label or _is_number(label):
+            return
+        view.rows.append(_ViewRow(band, [None] * view.col_count, texts))
+        view.bbox = (x0, view.bbox[1], x1, band[3])
+
+
+def _repair_views(views: list[_TableView], words: Sequence[tuple], rules: list) -> list[_TableView]:
+    """D-044: une fragmentos apilados (rearmando las filas blancas del hueco) y rearma las
+    filas que ``find_tables`` devolvió como una sola celda de todo el ancho."""
+    merged: list[_TableView] = []
+    for view in views:
+        if merged and _stacks(merged[-1], view, words, rules):
+            upper = merged[-1]
+            columns = _column_bounds(upper, 0)
+            x0, uy1, x1 = upper.bbox[0], upper.bbox[3], upper.bbox[2]
+            gap_rows = []
+            for band in _text_lines(words, x0, uy1, x1, view.bbox[1]):
+                texts = _row_from_words(words, band, columns)
+                if texts is None:  # una sola frase: rótulo sin valores, en la primera columna
+                    phrases = sorted(_phrases(words, band), key=lambda p: p.x0)
+                    texts = [" ".join(p.text for p in phrases)] + [None] * (upper.col_count - 1)
+                gap_rows.append(_ViewRow(band, [None] * upper.col_count, texts))
+            bbox = (min(x0, view.bbox[0]), upper.bbox[1], max(x1, view.bbox[2]), view.bbox[3])
+            merged[-1] = _TableView(bbox, upper.col_count, upper.rows + gap_rows + view.rows)
+        else:
+            merged.append(view)
+
+    for k, view in enumerate(merged):
+        if view.col_count < 2 or not any(all(c is not None for c in r.cells) for r in view.rows):
+            continue
+        columns = _column_bounds(view, 0)
+        limit = merged[k + 1].bbox[1] if k + 1 < len(merged) else float("inf")
+        _extend_trailing_rows(view, words, rules, columns, limit)
+        for row in view.rows:
+            first = row.cells[0]
+            spans = (
+                first is not None and all(c is None for c in row.cells[1:]) and first[2] > columns[0][1] + 2
+            )
+            if spans:
+                band = (view.bbox[0], row.bbox[1], view.bbox[2], row.bbox[3])
+                row.texts = _row_from_words(words, band, columns) or row.texts
+    return merged
+
+
 def _page_fragments(page: pymupdf.Page, page_number: int) -> list[_Fragment]:
     """Tablas de una página (FR-011), con su encabezado reconstruido y su cuerpo crudo."""
-    tables = sorted(page.find_tables().tables, key=lambda t: (round(t.bbox[1]), t.bbox[0]))
-    if not tables:
+    found = sorted(page.find_tables().tables, key=lambda t: (round(t.bbox[1]), t.bbox[0]))
+    if not found:
         return []
     words = page.get_text("words")
     rules = _horizontal_rules(page)
+    tables = _repair_views([_view(t) for t in found], words, rules)
 
     header_top: dict[int, float] = {}
     absorbed: set[int] = set()
@@ -574,11 +748,14 @@ def _page_fragments(page: pymupdf.Page, page_number: int) -> list[_Fragment]:
                 header = names
         else:
             # Sin encabezado propio: puede estar escrito como texto suelto encima (D-012).
-            # Se acepta solo si nombra >= 2 columnas (un título de una línea no es encabezado).
+            # Se acepta si nombra >= 2 columnas, o una sola que no sea la primera (p. ej.
+            # "1º semestre de 2026*" sobre la columna de valores, D-044): un título de una
+            # línea arranca a la izquierda y cae en la primera columna.
             ext_top = _external_header_top(words, y0, x0, x1)
             if ext_top is not None:
                 names = _header_from_band((x0, ext_top, x1, y0), columns, words, rules)
-                if sum(bool(n) for n in names) >= 2:
+                named = [j for j, n in enumerate(names) if n]
+                if len(named) >= 2 or (len(named) == 1 and named[0] > 0):
                     header, top = names, ext_top
         body = [list(r) for r in rows[n_header:] if not _is_empty_row(r)]
         fragments.append(

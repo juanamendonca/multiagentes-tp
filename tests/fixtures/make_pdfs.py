@@ -258,3 +258,52 @@ def five_tables() -> bytes:
         rows = [[f"Concepto {k}", f"Valor {k}"], [f"a{k}", "1,5"], [f"b{k}", "2,5"]]
         draw_table(page, 72, 60 + k * 140, rows, [120, 80])
     return _bytes(doc)
+
+
+# --- D-044: tablas "cebra" sin rayas verticales ------------------------------------------------
+
+ZEBRA_ROWS = [
+    ("Incidencia de la pobreza en hogares", "%", "24,4"),
+    ("Tamaño promedio del hogar pobre en personas", "", "3,89"),
+    ("Tamaño promedio del hogar pobre en adulto equivalente", "", "3,15"),
+    ("Canasta básica total promedio del hogar pobre (a)", "$", "1.440.395"),
+    ("Ingreso total familiar promedio del hogar pobre (b)", "$", "922.755"),
+    ("Brecha monetaria promedio de los hogares pobres (b-a)", "$", "-517.640"),
+    ("Brecha porcentual promedio de los hogares pobres (b-a)/a", "%", "35,9"),
+]
+
+
+def zebra_table(ends_on_white_row: bool = False) -> bytes:
+    """Cuadro estilo INDEC (Cuadro 2.2 del informe de pobreza): epígrafe, encabezado de una
+    sola columna escrito entre dos rayas ("1º semestre de 2026*" sobre los valores), sin rayas
+    verticales, filas de fondo gris alternado dibujado celda por celda y columna de unidad a
+    veces vacía. ``ends_on_white_row`` agrega una 8.ª fila sin fondo al final."""
+    rows = list(ZEBRA_ROWS)
+    if ends_on_white_row:
+        rows.append(("Hogares pobres (en miles)", "", "2.498"))
+    doc = _new()
+    page = _page(doc)
+    xs = [129.0, 405.0, 456.0, 534.0]
+    row_h, top = 14.3, 302.0
+    write(page, 60, 266, "Cuadro 2.2   Brecha de la pobreza. Total 31 aglomerados urbanos", fontsize=11)
+    for y in (280.0, 294.0):
+        page.draw_line((xs[0], y), (xs[-1], y), width=1)
+    write(page, 466, 291, "1º semestre de 2026*", fontsize=7)
+    shape = page.new_shape()
+    for i in range(0, len(rows), 2):
+        for a, b in zip(xs, xs[1:], strict=False):
+            shape.draw_rect(pymupdf.Rect(a, top + i * row_h, b, top + (i + 1) * row_h))
+    shape.finish(fill=(0.96, 0.96, 0.96), color=None, width=0)
+    shape.commit()
+    for i, (label, unit, value) in enumerate(rows):
+        baseline = top + i * row_h + row_h - 4
+        write(page, xs[0] + 4, baseline, label, fontsize=8)
+        if unit:
+            write(page, 428, baseline, unit, fontsize=8)
+        write(
+            page, 516 - pymupdf.get_text_length(value, fontname=FONT, fontsize=8), baseline, value, fontsize=8
+        )
+    bottom = top + len(rows) * row_h
+    page.draw_line((xs[0], bottom), (xs[-1], bottom), width=1)
+    write(page, 129, bottom + 16, "Fuente: INDEC, Dirección de Encuesta Permanente de Hogares.", fontsize=7)
+    return _bytes(doc)
