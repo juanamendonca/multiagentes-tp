@@ -32,9 +32,10 @@ LiteLLM de la materia y cada ejecución queda trazada en LangSmith.
 
 ## Instalación y ejecución
 
-Los comandos están escritos para **PowerShell en Windows**, desde la raíz del repositorio (en
-Linux/macOS: `.venv/bin/python` en lugar de `.venv\Scripts\python`, y `export VAR=valor` en lugar de
-`$env:VAR="valor"`).
+Cada paso tiene los comandos para **Windows (PowerShell)** y para **Linux / macOS (bash)**; se corren
+desde la raíz del repositorio. La diferencia es la ruta del venv (`.venv\Scripts\` en Windows,
+`.venv/bin/` en Linux/macOS) y cómo se define una variable de entorno (`$env:VAR="valor"` en
+PowerShell; `export VAR=valor`, o `VAR=valor comando` para un solo comando, en bash).
 
 ### Requisitos
 
@@ -45,18 +46,36 @@ Linux/macOS: `.venv/bin/python` en lugar de `.venv\Scripts\python`, y `export VA
 
 ### 1. Entorno virtual y dependencias
 
+**Windows (PowerShell)**
+
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
+```
+
+**Linux / macOS (bash)**
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
 `requirements.txt` fija todas las dependencias directas con `==` (incluye `pytest` y `ruff`).
 
 ### 2. Configuración (`.env`)
 
+**Windows (PowerShell)**
+
 ```powershell
 Copy-Item .env.example .env
 notepad .env
+```
+
+**Linux / macOS (bash)**
+
+```bash
+cp .env.example .env
+nano .env
 ```
 
 | Variable | Obligatoria | Default | Para qué / de dónde sale |
@@ -77,35 +96,55 @@ notepad .env
 | `LLM_CACHE` | no | `false` | Caché SQLite local de respuestas del LLM (`.langchain.db`). |
 | `MAX_TABLES_PER_PDF` | no | `40` | Tope de tablas procesadas por PDF. |
 
-Una variable vacía cuenta como no definida. Si falta alguna obligatoria, la app muestra cuáles y
-deshabilita las pestañas que las necesitan (sin tracebacks). `.env` está en `.gitignore`: nunca lo
-subas.
-
 **Durante el desarrollo usá la caché del LLM** para no gastar presupuesto del proxy repitiendo las
 mismas llamadas. La variable del proceso gana sobre el `.env`:
 
+**Windows (PowerShell)**
+
 ```powershell
 $env:LLM_CACHE="true"
+```
+
+**Linux / macOS (bash)**
+
+```bash
+export LLM_CACHE=true
 ```
 
 ### 3. Ingerir los PDFs de muestra
 
 Desde la app (pestaña **Subir PDF**, se pueden elegir varios archivos a la vez) o por consola:
 
+**Windows (PowerShell)**
+
 ```powershell
 .venv\Scripts\python -m agents.ingestion (Get-ChildItem data\sample_pdfs\*.pdf).FullName
 ```
 
+**Linux / macOS (bash)**
+
+```bash
+.venv/bin/python -m agents.ingestion data/sample_pdfs/*.pdf
+```
+
 (PowerShell no expande comodines al llamar a programas externos; `(Get-ChildItem …).FullName` pasa
-los tres PDFs como argumentos separados.) La CLI muestra por PDF las tablas indexadas, sus avisos y
+los tres PDFs como argumentos separados. En bash, `*.pdf` lo expande la shell.) La CLI muestra por PDF las tablas indexadas, sus avisos y
 el id de la traza de LangSmith; termina con código 1 si algún PDF no quedó indexado. Reingerir un
 PDF es seguro: los ids de las tablas dependen del contenido del archivo y no se duplican vectores.
 La ingesta de los tres PDFs tarda ~1 minuto y hace ~33 llamadas al LLM (una por tabla).
 
 ### 4. Levantar la app
 
+**Windows (PowerShell)**
+
 ```powershell
 .venv\Scripts\streamlit run app.py
+```
+
+**Linux / macOS (bash)**
+
+```bash
+.venv/bin/streamlit run app.py
 ```
 
 Se abre en <http://localhost:8501>. La primera carga tarda ~10 s (imports y una consulta a
@@ -113,15 +152,32 @@ Pinecone para validar el índice).
 
 También se puede preguntar desde la consola (muestra el plan, las tablas, el código y la salida):
 
+**Windows (PowerShell)**
+
 ```powershell
 .venv\Scripts\python -m agents.analyst "¿Cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2026?"
 ```
 
+**Linux / macOS (bash)**
+
+```bash
+.venv/bin/python -m agents.analyst "¿Cuál fue la tasa de desocupación del total de 31 aglomerados urbanos en el 2° trimestre de 2026?"
+```
+
 ### 5. Tests y lint
+
+**Windows (PowerShell)**
 
 ```powershell
 .venv\Scripts\ruff check .
 .venv\Scripts\python -m pytest -m "not integration"
+```
+
+**Linux / macOS (bash)**
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/python -m pytest -m "not integration"
 ```
 
 La suite sin red (~340 tests) no usa claves ni servicios: LLM, embeddings, Pinecone y LangSmith se
@@ -131,8 +187,16 @@ primera vez, ~29 s la segunda).
 
 Los tests de integración usan los servicios reales y el `.env`:
 
+**Windows (PowerShell)**
+
 ```powershell
 $env:LLM_CACHE="true"; .venv\Scripts\python -m pytest -m integration
+```
+
+**Linux / macOS (bash)**
+
+```bash
+LLM_CACHE=true .venv/bin/python -m pytest -m integration
 ```
 
 Crean un índice temporal `<PINECONE_INDEX_NAME>-itest-<hex>` (lo borran al terminar), escriben en un
@@ -141,13 +205,23 @@ PDFs de muestra ya ingeridos). Tardan ~3–4 minutos.
 
 ### 6. Evaluación
 
+**Windows (PowerShell)**
+
 ```powershell
 $env:LLM_CACHE="false"; .venv\Scripts\python -m eval.run_eval
+```
+
+**Linux / macOS (bash)**
+
+```bash
+LLM_CACHE=false .venv/bin/python -m eval.run_eval
 ```
 
 Corre el Analista sobre las 11 preguntas de [`eval/questions.yaml`](eval/questions.yaml) (≈ 45
 llamadas al LLM), guarda `eval/results/latest.json` y reescribe la tabla de resultados de
 [`EVALUATION.md`](EVALUATION.md). Sin caché, para que latencias y llamadas sean reales. Variantes:
+
+**Windows (PowerShell)**
 
 ```powershell
 # re-correr algunas preguntas (no toca EVALUATION.md)
@@ -156,13 +230,33 @@ llamadas al LLM), guarda `eval/results/latest.json` y reescribe la tabla de resu
 .venv\Scripts\python -m eval.run_eval --render eval\results\latest.json
 ```
 
+**Linux / macOS (bash)**
+
+```bash
+# re-correr algunas preguntas (no toca EVALUATION.md)
+.venv/bin/python -m eval.run_eval --ids q05 q07
+# reconstruir la tabla de EVALUATION.md desde resultados guardados, sin llamar al LLM
+.venv/bin/python -m eval.run_eval --render eval/results/latest.json
+```
+
 ### Herramientas auxiliares
+
+**Windows (PowerShell)**
 
 ```powershell
 # qué tablas extraería la ingesta de un PDF (sin LLM ni red)
 .venv\Scripts\python scripts\inspect_pdf.py data\sample_pdfs\indec_eph_mercado_trabajo_2t2026.pdf --context
 # diagramas de los grafos con draw_mermaid(); --check compara con los de este README
 .venv\Scripts\python scripts\mermaid_graphs.py --check
+```
+
+**Linux / macOS (bash)**
+
+```bash
+# qué tablas extraería la ingesta de un PDF (sin LLM ni red)
+.venv/bin/python scripts/inspect_pdf.py data/sample_pdfs/indec_eph_mercado_trabajo_2t2026.pdf --context
+# diagramas de los grafos con draw_mermaid(); --check compara con los de este README
+.venv/bin/python scripts/mermaid_graphs.py --check
 ```
 
 ## Uso de la app
@@ -191,18 +285,44 @@ resumen (con las claves ocultas); la app sigue funcionando y el historial no se 
 ## Arquitectura
 
 ```mermaid
-flowchart LR
-    user([Usuario]) --> ui[Streamlit<br/>app.py + ui/]
-    ui -->|PDF| ing[Agente de Ingesta<br/>agents/ingestion]
-    ui -->|pregunta| ana[Agente Analista<br/>agents/analyst]
-    ing -->|tablas Parquet + JSON| store[(data/tables)]
-    ing -->|1 vector por tabla| pc[(Pinecone)]
-    ana -->|búsqueda semántica| pc
-    ana -->|lee tablas elegidas| store
-    ana -->|código pandas| sb[Sandbox<br/>subproceso aislado]
-    ing & ana -->|chat + embeddings| llm[Proxy LiteLLM]
-    ing & ana -.->|trazas| ls[LangSmith]
+flowchart TB
+    user([Usuario]) --> ui["Streamlit<br/>app.py + ui/"]
+
+    subgraph agentes["Agentes LangGraph"]
+        direction LR
+        ing["Agente de Ingesta<br/>agents/ingestion"]
+        ana["Agente Analista<br/>agents/analyst"]
+    end
+
+    ui -- "sube un PDF" --> ing
+    ui -- "hace una pregunta" --> ana
+
+    subgraph datos["Almacenamiento"]
+        direction LR
+        store[("data/tables<br/>Parquet + JSON<br/>datos completos")]
+        pc[("Pinecone<br/>1 vector + metadatos<br/>por tabla")]
+    end
+
+    ing --> store
+    ing --> pc
+    ana -.-> pc
+    ana -.-> store
+    ana -- "código pandas" --> sb["Sandbox<br/>subproceso aislado"]
+
+    subgraph ext["Servicios externos"]
+        direction LR
+        llm["Proxy LiteLLM<br/>chat + embeddings"]
+        ls["LangSmith<br/>trazas"]
+    end
+
+    agentes --> llm
+    agentes --> ls
 ```
+
+Hacia el almacenamiento, la línea continua es la Ingesta **escribiendo** (Parquet + JSON local y un
+vector con metadatos en Pinecone) y la punteada es el Analista **leyendo** (busca en Pinecone y
+carga los Parquet de las tablas elegidas). Los dos agentes llaman al LLM y a los embeddings por el
+proxy LiteLLM y dejan una traza por ejecución en LangSmith.
 
 ```
 app.py                  punto de entrada de Streamlit (sin lógica propia)
@@ -407,8 +527,6 @@ normaliza en código (ids de partes, ids de tablas que no eran candidatas, parte
 3. Un preámbulo fijo (no el LLM) carga `tables` y después reemplaza `open` y los sockets por
    funciones que lanzan `PermissionError`.
 
-Docker o una VM quedaron fuera de alcance para una app local de un TP; el modelo de amenaza es código
-generado por el LLM con errores, no un adversario (ver Limitaciones).
 
 **Modelos.** `gpt-5.4-mini` con `temperature=0` y `text-embedding-3-small` (1536 dimensiones),
 elegidos con `notebooks/00_litellm_exploracion.ipynb`: todos los candidatos pasaron salida
@@ -454,80 +572,20 @@ falla y las trazas representativas, está en [`EVALUATION.md`](EVALUATION.md).
 
 ## Limitaciones conocidas y troubleshooting
 
-**Sandbox**
+- **Sandbox:** aísla el código generado en un subproceso con timeout, sin red ni acceso a archivos,
+  pero no es una frontera de seguridad del sistema operativo (no limita memoria ni CPU y el chequeo
+  del código usa listas de bloqueo). Sirve para contener errores del LLM, no ataques.
+- **Calidad de las respuestas:** la recuperación depende de cómo el LLM nombró y describió cada
+  tabla, así que a veces la tabla con el dato no aparece entre las candidatas. Aun con
+  `temperature=0` hay variación entre corridas, y la forma en que se divide la pregunta en partes
+  puede cambiar el estado final (`partial` o `cannot_answer`). No hay tope de candidatas para el
+  selector: con muchos más documentos habría que agregarlo. Detalle en `EVALUATION.md`.
+- **Extracción:** sin OCR (las páginas sin capa de texto se saltean con aviso). La detección de
+  tablas y encabezados usa heurísticas con umbrales fijos; un PDF con un diseño muy distinto puede
+  requerir ajustes. Algunos nombres de tabla generados no incluyen el período.
+- **Entorno:** probado solo con CPython 3.13 en Windows 11. Algunas APIs de `langsmith` que se
+  usan están marcadas como deprecadas.
 
-- **No es una frontera de seguridad del sistema operativo.** El proceso hijo corre con los permisos
-  del usuario, sin límite de memoria ni de CPU (solo el timeout). El chequeo AST es una lista de
-  bloqueo y por lo tanto incompleta: código arbitrario escrito por un adversario podría encontrar un
-  camino no listado (pyarrow, por ejemplo, lee archivos sin pasar por `open`; solo lo frena el AST).
-  Sirve para contener errores del código generado por el LLM, no ataques. No ejecutar código de
-  terceros con esta app.
-- Un falso positivo del AST (p. ej. una columna accedida como `df.system`) se corrige en el
-  reintento: el prompt pide `df["columna"]`.
-- Cada ejecución cuesta ~1–8 s (arranque de Python + `import pandas`), según la carga del equipo.
-
-**Calidad de las respuestas** (detalle en `EVALUATION.md`)
-
-- La recuperación depende de cómo quedó nombrada cada tabla: "personas desocupadas en GBA" a veces
-  no trae el cuadro "Población de referencia por región (en miles)" de la EPH 2T2026.
-- Con `temperature=0` igual hay no determinismo entre corridas. En una corrida, esa misma pregunta
-  recibió una **respuesta incorrecta sin aviso**: el selector cubrió la parte con una tabla que no
-  tenía la entidad pedida y el código usó la fila del total nacional rotulándola como GBA.
-- La forma en que el plan divide la pregunta decide entre `partial` y `cannot_answer`: un ajuste de
-  prompt corrigió un caso y empeoró otro (dos períodos pedidos, uno faltante, que pasan a ser una
-  sola parte → `cannot_answer` en lugar de `partial`).
-- El selector a veces marca como cubierta una parte con un período que no existe; el código lo
-  detecta y lo informa en `missing` (resultado correcto, a costa de una ejecución). También puede
-  agregar una tabla que el código no usa, que aparece igual entre las "tablas seleccionadas".
-- Los PDFs de muestra no tienen montos en pesos ni columnas de unidad ambigua: la regla de
-  conversiones que requieren datos externos se evalúa con otro caso (porcentaje de la población
-  mundial).
-- Sin tope de candidatas para el selector: con muchos más documentos habría que agregarlo.
-
-**Extracción y metadatos**
-
-- Sin OCR: las páginas sin capa de texto se saltean con un aviso, y las imágenes grandes se informan
-  como posibles tablas en imagen, sin procesarlas.
-- `find_tables` no detecta grillas de una sola columna; los gráficos generan avisos de tablas
-  descartadas (esperables).
-- Algunos nombres de tabla no incluyen el período (las dos EPH tienen "Principales tasas del mercado
-  de trabajo"; el período está en la descripción y las columnas). El Cuadro 1.3 de INDEC mezcla filas
-  en miles y en %; las filas de subtítulo de INDEC aparecen como rótulos de fila; CEPAL tiene notas
-  pegadas a nombres de países (`Argentinab`).
-
-**UI**
-
-- Las celdas vacías (`NaN`) se muestran como "None" en las tablas.
-- Abrir o cerrar una tabla en un desplegable hace un rerun (rápido; no vuelve a correr los agentes).
-- La primera carga tarda ~10 s. La subida por arrastrar y soltar no se probó de forma automatizada.
-- Explorar no muestra vectores huérfanos (documentos en Pinecone sin su `.json` local), y el conteo
-  de vectores se actualiza con su botón (Pinecone serverless es eventualmente consistente).
-- El link de la traza abre LangSmith y requiere sesión en esa cuenta.
-
-**Entorno**
-
-- Probado solo con CPython 3.13 en Windows 11. Las dependencias transitivas no están fijadas.
-- La suite sin red tarda ~30–55 s, cerca del objetivo de 60 s en un equipo cargado (el sandbox lanza
-  subprocesos reales); la primera corrida en un entorno recién creado lo supera (~80 s).
-- `langsmith` 0.14 marca como deprecados `Client.list_runs` y `Client.get_run_url` (usados en los
-  tests de integración y en el armado del link de la traza); hay que migrarlos antes de 2027.
-
-**Troubleshooting**
-
-| Síntoma | Causa / solución |
-|---|---|
-| La app muestra "Faltan variables…" | Completar esas variables en `.env` (una vacía cuenta como faltante). |
-| Error de dimensión del índice | `EMBEDDING_DIM` no coincide con el índice existente: corregir la variable o usar otro `PINECONE_INDEX_NAME`. |
-| "tabla … indexada pero sin datos locales" | El vector existe en Pinecone pero falta el Parquet en `TABLES_DIR` (otra máquina o carpeta borrada): reingerir ese PDF. |
-| "k de n tablas indexadas…" | Falló Pinecone o embeddings a mitad de la ingesta: reingerir el mismo PDF completa sin duplicados. |
-| Una reingesta vuelve a llamar al LLM | `LLM_CACHE` no está en `true`, o el archivo se subió con otro nombre. |
-| Quedó un índice `*-itest-*` en Pinecone | Se cortó un test de integración a mitad: borrarlo desde la consola de Pinecone. |
-| `python` del venv no encuentra paquetes | Correr siempre `.venv\Scripts\python …` desde la raíz del repo. |
-
-## Video demo
-
-**TODO(video): link al video** — demo de ≤ 5 minutos: ingesta, exploración y tres preguntas de
-punta a punta.
 
 ## Créditos
 
