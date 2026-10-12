@@ -325,17 +325,31 @@ proxy LiteLLM y dejan una traza por ejecución en LangSmith.
 
 **Estructura del repositorio**
 
-| Ruta | Contenido |
-|---|---|
-| `app.py` | Punto de entrada de Streamlit (sin lógica propia) |
-| `ui/` | Pestañas, render, manejo de errores y armado de dependencias |
-| `agents/ingestion/` | Grafo de Ingesta: nodos, prompts, schemas Pydantic, validación de metadatos y CLI |
-| `agents/analyst/` | Grafo Analista: nodos, prompts, schemas Pydantic, decisión de estado y CLI |
-| `services/` | Configuración, cliente LiteLLM y caché, extracción de PDF, normalización de tablas, contexto, almacén Parquet/JSON, Pinecone, sandbox y trazas |
-| `eval/` | Preguntas de prueba, runner de evaluación y resultados |
-| `scripts/` | Inspección de PDFs y diagramas Mermaid |
-| `data/sample_pdfs/` | PDFs de muestra y `SOURCES.md` |
-| `tests/` | `unit/` (sin red), `integration/` (servicios reales) y `fixtures/` (PDFs generados) |
+```
+.
+├── app.py                  # punto de entrada de Streamlit (sin lógica propia)
+├── ui/                     # pestañas, render, manejo de errores, armado de dependencias
+├── agents/
+│   ├── ingestion/          # grafo, nodos, prompts, schemas, validación de metadatos, CLI
+│   └── analyst/            # grafo, nodos, prompts, schemas, decisión de estado, CLI
+├── services/               # config, LiteLLM + caché, extracción PDF, normalización,
+│                           # almacén Parquet/JSON, Pinecone, sandbox, trazas
+├── eval/                   # preguntas de prueba, runner de evaluación y resultados
+├── scripts/                # inspección de PDFs y diagramas Mermaid
+├── data/
+│   ├── sample_pdfs/        # PDFs de muestra + SOURCES.md
+│   └── tables/             # tablas ingeridas, Parquet + JSON (generado, no versionado)
+├── tests/
+│   ├── unit/               # sin red ni claves (fakes)
+│   ├── integration/        # contra los servicios reales
+│   └── fixtures/           # PDFs generados para los tests
+├── specs/                  # especificación, plan y registro de decisiones
+├── assets/                 # capturas usadas en este README
+├── .env.example
+├── requirements.txt
+├── EVALUATION.md
+└── README.md
+```
 
 Los estados de ambos grafos son `TypedDict`, y todo lo que devuelve el LLM se parsea con modelos
 Pydantic vía `with_structured_output`. Las dependencias (chat, embeddings, Pinecone, almacén,
