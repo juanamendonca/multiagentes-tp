@@ -323,18 +323,19 @@ vector con metadatos en Pinecone) y la punteada es el Analista **leyendo** (busc
 carga los Parquet de las tablas elegidas). Los dos agentes llaman al LLM y a los embeddings por el
 proxy LiteLLM y dejan una traza por ejecución en LangSmith.
 
-```
-app.py                  punto de entrada de Streamlit (sin lógica propia)
-ui/                     pestañas, render, manejo de errores, armado de dependencias
-agents/ingestion/       grafo, nodos, prompts, schemas Pydantic, validación de metadatos, CLI
-agents/analyst/         grafo, nodos, prompts, schemas Pydantic, decisión de estado, CLI
-services/               config, cliente LiteLLM + caché, extracción PDF, normalización de tablas,
-                        contexto, almacén Parquet/JSON, Pinecone, sandbox, trazas
-eval/                   preguntas de prueba, runner de evaluación y resultados
-scripts/                inspección de PDFs y diagramas Mermaid
-data/sample_pdfs/       PDFs de muestra + SOURCES.md
-tests/unit, tests/integration, tests/fixtures
-```
+**Estructura del repositorio**
+
+| Ruta | Contenido |
+|---|---|
+| `app.py` | Punto de entrada de Streamlit (sin lógica propia) |
+| `ui/` | Pestañas, render, manejo de errores y armado de dependencias |
+| `agents/ingestion/` | Grafo de Ingesta: nodos, prompts, schemas Pydantic, validación de metadatos y CLI |
+| `agents/analyst/` | Grafo Analista: nodos, prompts, schemas Pydantic, decisión de estado y CLI |
+| `services/` | Configuración, cliente LiteLLM y caché, extracción de PDF, normalización de tablas, contexto, almacén Parquet/JSON, Pinecone, sandbox y trazas |
+| `eval/` | Preguntas de prueba, runner de evaluación y resultados |
+| `scripts/` | Inspección de PDFs y diagramas Mermaid |
+| `data/sample_pdfs/` | PDFs de muestra y `SOURCES.md` |
+| `tests/` | `unit/` (sin red), `integration/` (servicios reales) y `fixtures/` (PDFs generados) |
 
 Los estados de ambos grafos son `TypedDict`, y todo lo que devuelve el LLM se parsea con modelos
 Pydantic vía `with_structured_output`. Las dependencias (chat, embeddings, Pinecone, almacén,
