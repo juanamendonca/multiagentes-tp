@@ -26,8 +26,7 @@ LiteLLM de la materia y cada ejecución queda trazada en LangSmith.
 - [Decisiones de diseño](#decisiones-de-diseño)
 - [PDFs de muestra](#pdfs-de-muestra)
 - [Preguntas de prueba y evaluación](#preguntas-de-prueba-y-evaluación)
-- [Limitaciones conocidas y troubleshooting](#limitaciones-conocidas-y-troubleshooting)
-- [Video demo](#video-demo)
+- [Limitaciones conocidas](#limitaciones-conocidas-y-troubleshooting)
 - [Créditos](#créditos)
 
 ## Instalación y ejecución
