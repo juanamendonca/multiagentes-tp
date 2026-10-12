@@ -298,3 +298,15 @@ def test_document_decimal_signal_decides_ambiguous_columns() -> None:
 
     assert tables[1].df["Monto"].tolist() == [1234.0, 2500.0]
     assert not any(math.isnan(v) for v in tables[0].df["Tasa"])
+
+
+def test_vertically_merged_label_cells_are_repeated_in_every_row_they_span() -> None:
+    """Given una grilla donde "Hogares"/"Personas" y su unidad abarcan dos filas cada una, when
+    se extrae, then el rótulo y la unidad se repiten en cada fila que cubren (D-045)."""
+    tables, _ = extract(make_pdfs.vertical_merged_cells())
+
+    assert len(tables) == 1
+    df = tables[0].df
+    assert df["Grupo"].tolist() == ["Hogares", "Hogares", "Personas", "Personas"]
+    assert df["Unidad"].tolist() == ["Millones de $", "Millones de $", "$", "$"]
+    assert df["2025"].tolist() == [16116.0, 12598.0, 541948.0, 665222.0]

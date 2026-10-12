@@ -75,6 +75,7 @@ CAPTION_RE = re.compile(
 )
 
 _YEAR_RE = re.compile(r"\d{4}")
+_SPAN_LABEL_RE = re.compile(r"[^\W\d_]|[$%€]")  # una letra o un símbolo de unidad (D-045)
 
 
 class IngestionWarning(BaseModel):
@@ -712,6 +713,27 @@ def _repair_views(views: list[_TableView], words: Sequence[tuple], rules: list) 
     return merged
 
 
+def _fill_vertical_spans(table: _TableView, rows: list[Row], start: int) -> list[Row]:
+    """D-045: copia hacia abajo el valor de una celda combinada verticalmente (p. ej. "Hogares"
+    o "Millones de $" que abarcan 4 filas). ``find_tables`` deja ``None`` en las filas cubiertas;
+    se rellenan solo si la celda de arriba (en la misma columna, desde ``start``) llega hasta el
+    fondo de esa fila. Las celdas vacías reales (``""``) y las combinadas en horizontal no cambian."""
+    filled = [list(r) for r in rows]
+    for j in range(table.col_count):
+        cover: tuple[float, str | None] | None = None  # (borde inferior, texto) de la última celda
+        for i in range(start, len(table.rows)):
+            row = table.rows[i]
+            cell = row.cells[j] if j < len(row.cells) else None
+            if cell is not None:
+                text = filled[i][j]
+                # Solo rótulos y unidades ("Hogares", "Millones de $", "%"): números sueltos que
+                # caen en celdas altas (barras de un gráfico) no se copian.
+                cover = (cell[3], text) if text and _SPAN_LABEL_RE.search(text) else None
+            elif filled[i][j] is None and cover is not None and cover[0] >= row.bbox[3] - 1:
+                filled[i][j] = cover[1]
+    return filled
+
+
 def _page_fragments(page: pymupdf.Page, page_number: int) -> list[_Fragment]:
     """Tablas de una página (FR-011), con su encabezado reconstruido y su cuerpo crudo."""
     found = sorted(page.find_tables().tables, key=lambda t: (round(t.bbox[1]), t.bbox[0]))
@@ -757,7 +779,8 @@ def _page_fragments(page: pymupdf.Page, page_number: int) -> list[_Fragment]:
                 named = [j for j, n in enumerate(names) if n]
                 if len(named) >= 2 or (len(named) == 1 and named[0] > 0):
                     header, top = names, ext_top
-        body = [list(r) for r in rows[n_header:] if not _is_empty_row(r)]
+        filled = _fill_vertical_spans(table, rows, n_header)
+        body = [list(r) for r in filled[n_header:] if not _is_empty_row(r)]
         fragments.append(
             _Fragment(
                 page=page_number,

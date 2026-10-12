@@ -307,3 +307,33 @@ def zebra_table(ends_on_white_row: bool = False) -> bytes:
     page.draw_line((xs[0], bottom), (xs[-1], bottom), width=1)
     write(page, 129, bottom + 16, "Fuente: INDEC, Dirección de Encuesta Permanente de Hogares.", fontsize=7)
     return _bytes(doc)
+
+
+def vertical_merged_cells() -> bytes:
+    """Grilla con celdas combinadas verticalmente (D-045): "Hogares" y "Millones de $" abarcan
+    2 filas, "Personas" y "$" abarcan 2 filas (sin raya horizontal entre ellas en esas columnas)."""
+    doc = _new()
+    page = _page(doc)
+    xs = [72.0, 152.0, 352.0, 432.0, 512.0]
+    top = 100.0
+    rows = [
+        ("Grupo", "Indicador", "Unidad", "2025"),
+        ("Hogares", "Suma del ingreso total", "Millones de $", "16.116,0"),
+        ("", "Suma de ingresos laborales", "", "12.598,0"),
+        ("Personas", "Media del ingreso per cápita", "$", "541.948,0"),
+        ("", "Media por adulto equivalente", "", "665.222,0"),
+    ]
+    merged_below = {(1, 0), (1, 2), (3, 0), (3, 2)}  # (fila, columna) sin raya debajo
+    bottom = top + len(rows) * ROW_HEIGHT
+    for r in range(len(rows) + 1):
+        y = top + r * ROW_HEIGHT
+        for c in range(len(xs) - 1):
+            if (r - 1, c) not in merged_below:
+                page.draw_line((xs[c], y), (xs[c + 1], y), width=0.5)
+    for x in xs:
+        page.draw_line((x, top), (x, bottom), width=0.5)
+    for r, row in enumerate(rows):
+        for c, cell in enumerate(row):
+            if cell:
+                write(page, xs[c] + 3, top + r * ROW_HEIGHT + ROW_HEIGHT - 4, cell, fontsize=8)
+    return _bytes(doc)
